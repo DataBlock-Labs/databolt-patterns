@@ -32,6 +32,42 @@ The guard checks three times:
 
 `allow_private: true` turns off the address and host checks, but not the scheme check. It exists for tests and for trusted local networks, and is opt-in for every run.
 
+## Credential binding
+
+Every credential goes through one chokepoint: the HTTP client checks every request, and
+every redirect hop, before it is sent. A credential is a secret value or a value derived
+from one (a Basic-auth header, an OAuth access token, a Basic client-auth header), and the
+client finds it wherever it appears: in headers, the query string, the path or the body.
+It is attached only where all three rules allow it:
+
+1. **Origin.** For the REST and `http_get` patterns, the request must have the same origin
+   as `client.base_url` (or the `url`), or its host must match `client.auth_hosts`. This
+   applies to every auth type, including an `api_key` sent as a query param, to `${secrets.x}`
+   templated into headers or params, and to the OAuth access token.
+2. **No downgrade.** If `base_url` is https, credentials never go to a plain-http URL.
+3. **`secret_hosts`.** When the caller binds secrets to hosts (runner protocol `secret_hosts`,
+   CLI `--secret-host`), each secret, and everything derived from it, goes only to hosts on
+   its list.
+   - An exact entry matches that host only. A leading `*.` matches any subdomain, at any
+     depth, but not the apex, and never an IP address.
+   - A missing or empty list means the secret goes nowhere.
+
+When a rule says no, the client removes the header or query param that carries the
+credential and adds a warning. If the credential is in the path or the body, which cannot be
+removed safely, it refuses the request (`secret_host_mismatch`).
+
+Some cases fail before any request is made:
+
+- **Bindings that cannot be met.** If `base_url`'s host is outside a secret's
+  `secret_hosts`, or an OAuth `token_url` host is outside the client secret's, the run fails
+  with exit 2 and `secret_host_mismatch`. The error names the secret and the host, never the
+  value.
+- **OAuth `token_url`.** It must be on `base_url`'s origin, or match `client.auth_hosts`,
+  and it must be https when `base_url` is (otherwise `token_url_not_allowed`, exit 2).
+- **Next-page links and absolute `resource.path` values** that leave `base_url`'s origin
+  fail with `cross_origin_pagination`. A different port or scheme counts as leaving.
+  `client.allow_cross_origin_pagination: true` follows them, but **without credentials**.
+
 ## Secrets
 
 - **References, not values.** Params hold `${secrets.<name>}` references, never values. Secret fields in a schema carry `format: secret-ref` and reject literal values. The values arrive only in the protocol request's `secrets` object (stdin, never argv or the environment) or through the CLI's `--secret name=@env:VAR`.
@@ -42,7 +78,7 @@ The guard checks three times:
   - stderr progress lines;
   - anything a pattern `print()`s;
   - the protocol result itself, including preview records that echo a token back.
-- **Same-origin only.** Credentials are attached only to requests with the same origin as `client.base_url`. A paginator's next URL on another origin is fetched without credentials, and the run gets a warning.
+- **Bound, not broadcast.** Credentials go only where the binding above allows.
 
 ## Protocol integrity
 

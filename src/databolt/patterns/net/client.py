@@ -18,6 +18,7 @@ import os
 import random
 import ssl
 import time
+import urllib.parse
 import urllib.request
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from typing import Any
@@ -29,6 +30,7 @@ import httpx
 from databolt.patterns._version import __version__
 from databolt.patterns.errors import (
     BudgetExhausted,
+    CredentialBlocked,
     EgressBlocked,
     HttpError,
     PatternError,
@@ -37,9 +39,10 @@ from databolt.patterns.errors import (
 )
 from databolt.patterns.limits import Budget
 from databolt.patterns.net.backoff import full_jitter, is_retryable_status, parse_retry_after
+from databolt.patterns.net.credentials import CredentialPolicy
 from databolt.patterns.net.guard import EgressGuard, GuardedBackend
 from databolt.patterns.net.ratelimit import RateLimiter
-from databolt.patterns.redact import Redactor, redact_url
+from databolt.patterns.redact import MIN_SECRET_LEN, Redactor, redact_url
 
 USER_AGENT = f"databolt-standard-patterns/{__version__}"
 # Never forwarded: a caller must not forge identity/forwarding headers (Studio's C13).
@@ -293,6 +296,8 @@ class HttpClient:
         rng: random.Random | None = None,
         verify: bool | str = True,
         user_agent: str = USER_AGENT,
+        policy: CredentialPolicy | None = None,
+        credentials: Mapping[str, str] | None = None,
     ) -> None:
         self.guard = guard or EgressGuard()
         self.budget = budget or Budget()
@@ -303,6 +308,16 @@ class HttpClient:
         self.verify = verify
         self.user_agent = user_agent
         self._clients: dict[str | None, httpx.Client] = {}
+        self.policy = policy or CredentialPolicy()
+        # credential value -> secret name; see net/credentials.py
+        self.credentials: dict[str, str] = {}
+        for name, value in (credentials or {}).items():
+            self.add_credential(name, value)
+
+    def add_credential(self, name: str, value: str) -> None:
+        """Track `value` (a secret, or something derived from one) as belonging to `name`."""
+        if isinstance(value, str) and len(value) >= MIN_SECRET_LEN:
+            self.credentials[value] = name
 
     @property
     def stats(self) -> Any:
@@ -450,6 +465,7 @@ class HttpClient:
         current = url
         for _hop in range(self.guard.policy.max_redirects + 1):
             self.guard.check_url(current)
+            current = self._withhold_credentials(current, headers, body)
             client = self._client_for(current)
             req = client.build_request(
                 method, current, headers=headers, content=body, timeout=self.budget.timeout()
@@ -478,6 +494,37 @@ class HttpClient:
         raise EgressBlocked(
             f"too many redirects (> {self.guard.policy.max_redirects})", code="too_many_redirects"
         )
+
+    def _withhold_credentials(
+        self, url: httpx.URL, headers: dict[str, str], body: bytes | None
+    ) -> httpx.URL:
+        """Remove every credential the policy does not allow at `url` (mutates headers).
+
+        A credential in a header or a query param is dropped with a warning. One in the
+        path or the body cannot be removed safely, so the request is refused.
+        """
+        for value, name in self.credentials.items():
+            reason = self.policy.denial(name, url)
+            if reason is None:
+                continue
+            withheld = False
+            for h in [h for h, v in headers.items() if value in v]:
+                del headers[h]
+                withheld = True
+            params = url.params
+            bad = {k for k, v in params.multi_items() if value in v}
+            if bad:
+                for k in bad:
+                    params = params.remove(k)
+                url = url.copy_with(query=str(params).encode() or None)
+                withheld = True
+            raw_path = url.raw_path.decode("ascii", "replace").split("?")[0]
+            encoded = urllib.parse.quote(value, safe="")
+            if value in raw_path or encoded in raw_path or (body and value.encode() in body):
+                raise CredentialBlocked(f"refusing to send secret {name!r} to {url.host}: {reason}")
+            if withheld:
+                self.stats.warn(f"withheld secret {name!r} from {url.host}: {reason}")
+        return url
 
     def _read(self, resp: httpx.Response, url: httpx.URL) -> bytes:
         cap = self.budget.limits.max_response_bytes

@@ -95,19 +95,6 @@ def test_oauth2_client_credentials(httpserver: HTTPServer, client_auth: str) -> 
     assert len(token_calls) == 1  # cached for the run
 
 
-def test_auth_not_sent_to_another_origin(httpserver: HTTPServer) -> None:
-    # The next URL points at `localhost`, a different origin from 127.0.0.1.
-    other = f"http://localhost:{httpserver.port}/elsewhere"
-    httpserver.expect_request("/data").respond_with_json({"items": [{"i": 1}], "next": other})
-    httpserver.expect_request("/elsewhere").respond_with_json({"items": [{"i": 2}]})
-    p = params(httpserver, {"type": "bearer"})
-    p["resource"] = {"path": "data", "data_selector": "items"}  # type: ignore[index]
-    res, rows = run_rest(p, secrets={"token": "tok-x"})
-    assert len(rows) == 2
-    assert "Authorization" not in httpserver.log[1][0].headers
-    assert any("not sending credentials" in w for w in res.warnings)
-
-
 def test_literal_secret_in_auth_is_rejected() -> None:
     with pytest.raises(ValidationError, match="token"):
         api.RestApiPattern().parse_params(

@@ -16,6 +16,7 @@ from databolt.patterns import templating
 from databolt.patterns.errors import ValidationError
 from databolt.patterns.limits import Budget, Limits, RunStats, merge_cap
 from databolt.patterns.net.client import HttpClient
+from databolt.patterns.net.credentials import CredentialPolicy
 from databolt.patterns.net.guard import EgressGuard, EgressPolicy
 from databolt.patterns.redact import Redactor
 
@@ -86,6 +87,7 @@ class RunContext:
         http: HttpClient | None = None,
         log_stream: TextIO | None = None,
         guard: EgressGuard | None = None,
+        secret_hosts: Mapping[str, list[str]] | None = None,
     ) -> None:
         self.params = params
         self.secrets: Mapping[str, str] = dict(secrets or {})
@@ -97,6 +99,9 @@ class RunContext:
         self.guard = guard or EgressGuard(self.egress)
         self._http = http
         self._log_stream = log_stream
+        # Where each secret may be sent (runner protocol `secret_hosts`); patterns may add
+        # an origin binding (the REST pattern binds credentials to base_url's origin).
+        self.credential_policy = CredentialPolicy(secret_hosts)
         self.max_pages: int | None = self.limits.max_pages
         self.max_records: int | None = self.limits.max_records
         self.truncated = False
@@ -111,8 +116,20 @@ class RunContext:
     @property
     def http(self) -> HttpClient:
         if self._http is None:
-            self._http = HttpClient(self.guard, self.budget, self.redactor)
+            self._http = HttpClient(
+                self.guard,
+                self.budget,
+                self.redactor,
+                policy=self.credential_policy,
+                credentials=self.secrets,
+            )
         return self._http
+
+    def add_credential(self, secret_name: str, value: str) -> None:
+        """Register a value derived from a secret (an auth header, an OAuth token) so it is
+        redacted and only sent where that secret is allowed to go."""
+        self.redactor.add(value)
+        self.http.add_credential(secret_name, value)
 
     def close(self) -> None:
         if self._http is not None:
@@ -186,6 +203,10 @@ class Pattern(ABC):
         any `${secrets.x}` referenced in params."""
         declared = {s.name for s in self.secrets if s.required}
         return declared | templating.references(params.model_dump(by_alias=True), "secrets")
+
+    def check_bindings(self, params: BaseModel, ctx: RunContext) -> None:  # noqa: B027
+        """Fail fast, before any request, when a secret cannot go where it must
+        (raise SecretHostMismatch). The default does nothing."""
 
     def source_label(self, params: BaseModel) -> str:
         """A redacted origin for `_source` (scheme://host/path, never a query string)."""

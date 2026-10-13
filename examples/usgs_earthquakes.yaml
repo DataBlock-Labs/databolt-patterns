@@ -5,8 +5,9 @@
 #
 # The first run starts at `initial_value`. Each run proposes the newest event time as the
 # cursor; the CLI commits it to --state only after the output file is written. The next
-# run sends it as `starttime`, so it lands only newer events (range_start: open drops the
-# boundary event the inclusive `starttime` filter returns again).
+# run sends it as `starttime` (inclusive), and the event ids stored with the cursor
+# (`primary_key: id`) skip the boundary event already landed, so it lands only new events,
+# including any that share the last event's exact timestamp.
 client:
   base_url: https://earthquake.usgs.gov/fdsnws/event/1/
   paginator:
@@ -25,4 +26,5 @@ resource:
     initial_value: "2026-10-01T00:00:00Z"
     transform: epoch_ms_to_iso
     order: asc
+    primary_key: id
 max_pages: 20

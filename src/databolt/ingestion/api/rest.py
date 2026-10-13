@@ -21,9 +21,15 @@ from databolt.ingestion.api import paginators as pag
 from databolt.ingestion.api.config import RestConfig
 from databolt.ingestion.api.incremental import Incremental, IncrementalConfig
 from databolt.patterns.contract import Pattern, Record, RunContext, SecretSpec
-from databolt.patterns.errors import HttpError
+from databolt.patterns.errors import (
+    CrossOriginPagination,
+    HttpError,
+    SecretHostMismatch,
+    ValidationError,
+)
 from databolt.patterns.limits import Limits
 from databolt.patterns.net.client import HttpResponse
+from databolt.patterns.net.credentials import host_matches, origin_of
 from databolt.patterns.net.guard import EgressPolicy
 from databolt.patterns.net.ratelimit import RateLimiter
 from databolt.patterns.redact import redact_url
@@ -52,9 +58,16 @@ def join_url(base_url: str, path: str) -> str:
     return base_url.rstrip("/") + "/" + path.lstrip("/")
 
 
-def _origin(url: str) -> tuple[str, str, int | None]:
-    u = httpx.URL(url)
-    return (u.scheme, u.host, u.port or (443 if u.scheme == "https" else 80))
+def check_secret_hosts(names: set[str], host: str, ctx: RunContext, what: str) -> None:
+    """Raise SecretHostMismatch if any of `names` may not be sent to `host`."""
+    policy = ctx.credential_policy
+    for name in sorted(names):
+        if not policy.secret_allows_host(name, host):
+            bound = (policy.secret_hosts or {}).get(name) or []
+            raise SecretHostMismatch(
+                f"secret {name!r} is bound to {bound or 'no hosts'}; {what} host {host!r} "
+                "is not among them"
+            )
 
 
 class RestApiPattern(Pattern):
@@ -108,6 +121,7 @@ class RestApiPattern(Pattern):
                         "initial_value": "2026-10-01T00:00:00Z",
                         "transform": "epoch_ms_to_iso",
                         "order": "asc",
+                        "primary_key": "id",
                     },
                 },
             },
@@ -127,6 +141,37 @@ class RestApiPattern(Pattern):
             return ""
         return redact_url(join_url(params.client.base_url, params.resource.path))
 
+    def check_bindings(self, params: BaseModel, ctx: RunContext) -> None:
+        """Before any request: where each secret must go has to be allowed."""
+        assert isinstance(params, RestConfig)
+        client = params.client
+        base_url = str(ctx.render(client.base_url))
+        base = httpx.URL(base_url)
+        url = join_url(base_url, str(ctx.render(params.resource.path)))
+        if origin_of(url) != origin_of(base) and not client.allow_cross_origin_pagination:
+            raise CrossOriginPagination(
+                f"resource.path {redact_url(url)} is not on base_url's origin; fix base_url, "
+                "or set client.allow_cross_origin_pagination (sent without credentials)"
+            )
+        oauth_names: set[str] = set()
+        if isinstance(client.auth, auth_mod.OAuth2ClientCredentials):
+            token_url = httpx.URL(str(ctx.render(client.auth.token_url)))
+            if origin_of(token_url) != origin_of(base) and not host_matches(
+                token_url.host, client.auth_hosts
+            ):
+                raise ValidationError(
+                    f"oauth token_url host {token_url.host!r} is not base_url's origin; add "
+                    "it to client.auth_hosts to allow sending client credentials there",
+                    code="token_url_not_allowed",
+                )
+            if base.scheme == "https" and token_url.scheme != "https":
+                raise ValidationError(
+                    "oauth token_url must be https when base_url is", code="token_url_not_allowed"
+                )
+            oauth_names = auth_mod.secret_names(client.auth)
+            check_secret_hosts(oauth_names, token_url.host, ctx, "oauth token_url")
+        check_secret_hosts(self.required_secrets(params), base.host, ctx, "base_url")
+
     def iter_records(self, params: BaseModel, ctx: RunContext) -> Iterator[Record]:
         assert isinstance(params, RestConfig)
         cfg = params
@@ -144,6 +189,7 @@ class RestApiPattern(Pattern):
             extra_state["cursor"] = inc.param_value()
 
         base_url = str(ctx.render(cfg.client.base_url))
+        ctx.credential_policy.bind_origin(base_url, cfg.client.auth_hosts)
         url = join_url(base_url, str(ctx.render(res.path)))
         ctx.stats.source_label = redact_url(url)
         headers = {k: str(v) for k, v in ctx.render(cfg.client.headers).items()}
@@ -155,7 +201,7 @@ class RestApiPattern(Pattern):
                 query[res.incremental.param] = start
 
         authn = auth_mod.Authenticator(cfg.client.auth, ctx)
-        base_origin = _origin(base_url)
+        base_origin = origin_of(base_url)
         paginator = pag.build(cfg.effective_paginator)
         ignore = res.response_actions
         ignore_statuses = {a.status_code for a in ignore if a.status_code is not None}
@@ -169,13 +215,10 @@ class RestApiPattern(Pattern):
             seen.add(req.signature())
             req_headers = dict(headers)
             req_params = dict(req.params)
-            if _origin(req.url) == base_origin:
+            if authn.allowed_at(req.url):
                 authn.apply(req_headers, req_params)
             elif not isinstance(cfg.client.auth, auth_mod.NoAuth):
-                ctx.warn(
-                    f"not sending credentials to {redact_url(req.url)}: a different origin "
-                    "from base_url"
-                )
+                ctx.warn(f"not sending credentials to {redact_url(req.url)}")
             resp = ctx.http.request(
                 res.method,
                 req.url,
@@ -224,6 +267,12 @@ class RestApiPattern(Pattern):
 
             if nxt is None:
                 break
+            if origin_of(nxt.url) != base_origin and not cfg.client.allow_cross_origin_pagination:
+                raise CrossOriginPagination(
+                    f"next page {redact_url(nxt.url)} is not on base_url's origin "
+                    f"{redact_url(base_url)}; set client.allow_cross_origin_pagination to follow "
+                    "it (without credentials)"
+                )
             if nxt.signature() in seen:
                 ctx.warn("pagination returned a page that was already fetched; stopping")
                 break

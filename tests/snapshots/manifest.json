@@ -558,6 +558,26 @@
                 "x-databolt-ui": {
                   "order": 3
                 }
+              },
+              "auth_hosts": {
+                "description": "Extra hosts that may receive credentials, besides base_url's origin (e.g. an OAuth token endpoint). Exact host, or *.example.com for subdomains.",
+                "items": {
+                  "type": "string"
+                },
+                "title": "Auth Hosts",
+                "type": "array",
+                "x-databolt-ui": {
+                  "advanced": true
+                }
+              },
+              "allow_cross_origin_pagination": {
+                "default": false,
+                "description": "Follow next-page links to another origin (never with credentials). Off: such a link fails the run with cross_origin_pagination.",
+                "title": "Allow Cross Origin Pagination",
+                "type": "boolean",
+                "x-databolt-ui": {
+                  "advanced": true
+                }
               }
             },
             "required": [
@@ -733,14 +753,33 @@
                 "type": "number"
               },
               "range_start": {
-                "default": "open",
-                "description": "'open' drops records equal to the committed cursor on a resumed run.",
+                "default": "closed",
+                "description": "'closed' (default) keeps records equal to the committed cursor (deduped by primary_key when set); 'open' drops them, which suits strictly increasing cursors only.",
                 "enum": [
                   "open",
                   "closed"
                 ],
                 "title": "Range Start",
                 "type": "string"
+              },
+              "primary_key": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Dotted path(s) identifying a record, used to skip records already landed at the cursor boundary.",
+                "title": "Primary Key"
               }
             },
             "required": [
@@ -1344,7 +1383,8 @@
                 "cursor_path": "properties.time",
                 "initial_value": "2026-10-01T00:00:00Z",
                 "transform": "epoch_ms_to_iso",
-                "order": "asc"
+                "order": "asc",
+                "primary_key": "id"
               }
             }
           }

@@ -82,6 +82,7 @@ def run(
     log_stream: TextIO | None = None,
     redactor: Redactor | None = None,
     guard: EgressGuard | None = None,
+    secret_hosts: Mapping[str, list[str]] | None = None,
 ) -> RunResult:
     """Run `pattern` once. Raises PatternError on failure (partial output is removed).
 
@@ -119,7 +120,9 @@ def run(
         budget=budget,
         log_stream=log_stream,
         guard=guard or EgressGuard(egress),
+        secret_hosts=secret_hosts,
     )
+    p.check_bindings(parsed, ctx)  # before any request: secret_host_mismatch is exit 2
     out = MemorySink() if preview or sink is None else sink
     budget.stats.source_label = p.source_label(parsed)
     truncated = False

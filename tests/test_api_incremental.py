@@ -51,6 +51,7 @@ def usgs(server: HTTPServer, **inc: object) -> dict[str, object]:
                 "initial_value": ms_iso(T0),
                 "transform": "epoch_ms_to_iso",
                 "order": "asc",
+                "primary_key": "id",
                 **inc,
             },
         },
@@ -62,11 +63,13 @@ def test_advance_then_only_new_rows(httpserver: HTTPServer) -> None:
     quake_server(httpserver, events)
     res, rows = run_rest(usgs(httpserver))
     assert len(rows) == 5 and res.pages == 3
-    assert res.state == {"cursor": ms_iso(T0 + 4000), "cursor_path": "properties.time"}
+    assert res.state["cursor"] == ms_iso(T0 + 4000)
     assert res.state_changed
     assert httpserver.log[0][0].args["starttime"] == ms_iso(T0)
 
-    # second run, nothing new: the inclusive boundary event is dropped (range_start open)
+    assert res.state["boundary_keys"] == [f"ev{T0 + 4000}"]
+    # second run, nothing new: the inclusive start returns the boundary event again, and its
+    # id (in boundary_keys) keeps it from landing twice
     res2, rows2 = run_rest(usgs(httpserver), state=res.state)
     assert rows2 == [] and not res2.state_changed and res2.state == res.state
 
@@ -77,11 +80,45 @@ def test_advance_then_only_new_rows(httpserver: HTTPServer) -> None:
     assert res3.state["cursor"] == ms_iso(T0 + 9500)
 
 
-def test_closed_range_keeps_boundary(httpserver: HTTPServer) -> None:
+def test_same_timestamp_event_is_not_skipped(httpserver: HTTPServer) -> None:
+    """A later event that shares the boundary timestamp must land (the bug an exclusive
+    start would cause); the already-landed boundary event must not land twice."""
+    events = [T0, T0 + 1000]
+    quake_server(httpserver, events)
+    res, _ = run_rest(usgs(httpserver))
+    assert res.state["boundary_keys"] == [f"ev{T0 + 1000}"]
+
+    httpserver.clear()
+
+    def handler(request: Request) -> Response:
+        feats = [
+            {"id": f"ev{T0 + 1000}", "properties": {"time": T0 + 1000}},  # already landed
+            {"id": "late-same-ms", "properties": {"time": T0 + 1000}},  # new, same timestamp
+            {"id": "newer", "properties": {"time": T0 + 2000}},
+        ]
+        if request.args.get("offset") != "1":
+            feats = []
+        return Response(json.dumps({"features": feats}), content_type="application/json")
+
+    httpserver.expect_request("/query").respond_with_handler(handler)
+    res2, rows2 = run_rest(usgs(httpserver), state=res.state)
+    assert [r["id"] for r in rows2] == ["late-same-ms", "newer"]
+    assert res2.state["cursor"] == ms_iso(T0 + 2000)
+    assert res2.state["boundary_keys"] == ["newer"]
+
+
+def test_without_primary_key_the_boundary_relands(httpserver: HTTPServer) -> None:
     quake_server(httpserver, [T0, T0 + 1000])
     state = {"cursor": ms_iso(T0 + 1000), "cursor_path": "properties.time"}
-    _, rows = run_rest(usgs(httpserver, range_start="closed"), state=state)
+    _, rows = run_rest(usgs(httpserver, primary_key=None), state=state)
     assert [r["properties"]["time"] for r in rows] == [T0 + 1000]
+
+
+def test_open_range_drops_the_boundary(httpserver: HTTPServer) -> None:
+    quake_server(httpserver, [T0, T0 + 1000])
+    state = {"cursor": ms_iso(T0 + 1000), "cursor_path": "properties.time"}
+    _, rows = run_rest(usgs(httpserver, primary_key=None, range_start="open"), state=state)
+    assert rows == []
 
 
 def test_lookback_rereads_a_window(httpserver: HTTPServer) -> None:
@@ -150,9 +187,10 @@ def test_tracker_unit_rules() -> None:
     inc.observe({"t": 11})
     p = inc.proposal(truncated=False)
     assert p.changed and p.state == {"cursor": 12, "cursor_path": "t"}
+    assert Incremental(IncrementalConfig(cursor_path="t"), {"cursor": 5}).keep({"t": 5})
 
     iso = Incremental(
-        IncrementalConfig(cursor_path="ts", transform="iso8601"),
+        IncrementalConfig(cursor_path="ts", transform="iso8601", range_start="open"),
         {"cursor": "2026-01-01T00:00:00Z"},
     )
     assert not iso.keep({"ts": "2026-01-01T00:00:00+00:00"})  # open range, equal

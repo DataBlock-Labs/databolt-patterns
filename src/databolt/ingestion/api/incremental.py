@@ -1,15 +1,28 @@
 """Incremental loading: send the last cursor, filter old records, propose the next cursor.
 
-State is `{"cursor": <value>, "cursor_path": <path>}`. It is only a *proposal*: the
-caller commits it after landing succeeds. Rules:
+State is `{"cursor": <value>, "cursor_path": <path>}`, plus `"boundary_keys"` when a
+`primary_key` is set. It is only a *proposal*: the caller commits it after landing
+succeeds. The rules:
 
-- The start value is the committed cursor (minus `lookback`), else `initial_value`.
-- Records whose cursor is below the start value are dropped (the API ignored the
-  filter). With `range_start: open` (default), a resumed run also drops records equal
-  to the committed cursor, so an inclusive API filter does not re-land the boundary row.
-- The proposal is the maximum cursor among *landed* records, never moving backwards.
-- A **truncated** run advances only when `order: asc`: with any other order the
-  unfetched remainder may hold older records, and advancing would skip them forever.
+- **Start value.** The start is the committed cursor (minus `lookback`), else
+  `initial_value`. Records whose cursor is below the start are dropped, in case the API
+  ignored the filter.
+- **Boundary.** The start is **inclusive** by default (`range_start: closed`). Records
+  equal to the committed cursor can be new: a later event may share the last event's
+  exact timestamp. Several settings decide what happens to them:
+  - With a `primary_key`, the state remembers the keys of the records that sat exactly on
+    the cursor (`boundary_keys`). A resumed run drops only those, so the boundary record
+    is not landed twice and a new same-timestamp record is not lost.
+  - Without a `primary_key`, the boundary record is landed again. That is safe, but it
+    duplicates: dedupe downstream, or merge on a key.
+  - `range_start: open` drops every record equal to the cursor. It never duplicates, but
+    it can skip a record that shares the timestamp, so use it only for strictly
+    increasing cursors (sequence ids).
+- **Proposal.** The proposal is the maximum cursor among *landed* records, and it never
+  moves backwards.
+- **Truncated runs.** A truncated run advances only when `order: asc`. With any other
+  order, the unfetched remainder may hold older records, and advancing would skip them
+  forever.
 """
 
 from __future__ import annotations
@@ -22,6 +35,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from databolt.patterns.contract import Record, StateProposal
 from databolt.patterns.errors import ValidationError
 from databolt.patterns.selectors import get_path
+
+# Cap on remembered boundary keys; beyond it the boundary is re-landed rather than skipped.
+MAX_BOUNDARY_KEYS = 1000
 
 Transform = Literal["none", "iso8601", "epoch_ms_to_iso", "epoch_s_to_iso"]
 
@@ -48,8 +64,15 @@ class IncrementalConfig(BaseModel):
         0, ge=0, description="Re-read this many seconds (or units) before the cursor."
     )
     range_start: Literal["open", "closed"] = Field(
-        "open",
-        description="'open' drops records equal to the committed cursor on a resumed run.",
+        "closed",
+        description="'closed' (default) keeps records equal to the committed cursor (deduped "
+        "by primary_key when set); 'open' drops them, which suits strictly increasing "
+        "cursors only.",
+    )
+    primary_key: str | list[str] | None = Field(
+        None,
+        description="Dotted path(s) identifying a record, used to skip records already "
+        "landed at the cursor boundary.",
     )
 
 
@@ -86,6 +109,11 @@ class Incremental:
                     f"{cfg.cursor_path!r}; starting from initial_value"
                 )
         self.resuming = stored is not None
+        self.stored_boundary: set[str] = set()
+        if stored is not None and state is not None:
+            self.stored_boundary = {str(k) for k in state.get("boundary_keys") or []}
+        self.max_boundary: set[str] = set()
+        self.boundary_overflow = False
         self.stored_key = self._key(stored) if stored is not None else None
         start = stored if stored is not None else cfg.initial_value
         self.start_key = self._key(start) if start is not None else None
@@ -158,6 +186,16 @@ class Incremental:
         except ValidationError:
             return None
 
+    def pk(self, record: Record) -> str | None:
+        pk = self.cfg.primary_key
+        if pk is None:
+            return None
+        paths = [pk] if isinstance(pk, str) else pk
+        values = [get_path(record, p) for p in paths]
+        if all(v is None for v in values):
+            return None
+        return "|".join("" if v is None else str(v) for v in values)
+
     def keep(self, record: Record) -> bool:
         """False for records the cursor says were already loaded."""
         k = self.record_key(record)
@@ -165,13 +203,31 @@ class Incremental:
             return True
         if self._lt(k, self.start_key):
             return False
-        open_range = self.cfg.range_start == "open" and self.resuming and not self.cfg.lookback
-        return not (open_range and not self._lt(self.start_key, k))
+        if not self.resuming or self.stored_key is None:
+            return True
+        at_boundary = not self._lt(self.stored_key, k) and not self._lt(k, self.stored_key)
+        if not at_boundary:
+            return True
+        if self.cfg.range_start == "open" and not self.cfg.lookback:
+            return False
+        key = self.pk(record)
+        return key is None or key not in self.stored_boundary
 
     def observe(self, record: Record) -> None:
         k = self.record_key(record)
-        if k is not None and (self.max_key is None or self._lt(self.max_key, k)):
+        if k is None:
+            return
+        if self.max_key is None or self._lt(self.max_key, k):
             self.max_key = k
+            self.max_boundary = set()
+            self.boundary_overflow = False
+        if not self._lt(k, self.max_key):  # k == max
+            key = self.pk(record)
+            if key is not None:
+                if len(self.max_boundary) < MAX_BOUNDARY_KEYS:
+                    self.max_boundary.add(key)
+                else:
+                    self.boundary_overflow = True
 
     def proposal(self, truncated: bool) -> StateProposal:
         if self.max_key is None:
@@ -184,7 +240,19 @@ class Incremental:
                 f"(order={self.cfg.order}); the cursor was not advanced so that older "
                 "records in the unfetched pages are not skipped",
             )
-        if self.stored_key is not None and not self._lt(self.stored_key, self.max_key):
-            return StateProposal(None, False, self.warning)
-        state = {"cursor": self._format(self.max_key), "cursor_path": self.cfg.cursor_path}
+        boundary = self.max_boundary
+        if self.stored_key is not None:
+            if self._lt(self.max_key, self.stored_key):
+                return StateProposal(None, False, self.warning)
+            if not self._lt(self.stored_key, self.max_key):
+                # Same cursor as before: only new boundary keys change the state.
+                if boundary <= self.stored_boundary:
+                    return StateProposal(None, False, self.warning)
+                boundary = boundary | self.stored_boundary
+        state: dict[str, Any] = {
+            "cursor": self._format(self.max_key),
+            "cursor_path": self.cfg.cursor_path,
+        }
+        if self.cfg.primary_key is not None and not self.boundary_overflow:
+            state["boundary_keys"] = sorted(boundary)[:MAX_BOUNDARY_KEYS]
         return StateProposal(state, True, self.warning)

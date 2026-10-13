@@ -97,3 +97,13 @@ def test_validate_params_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]
     f.write_text("url: https://example.com\n")
     assert main(["validate", str(f), "--pattern", "test.fetch"]) == 0
     assert out_json(capsys)["required_secrets"] == ["token"]
+
+
+def test_secret_host_flag(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    rc = main(["run", "test.fetch", "--param", "url=http://127.0.0.1:9/", "--secret",
+               "token=abcd-secret", "--secret-host", "token=api.example.com",
+               "--allow-private", "--out", str(tmp_path)])  # fmt: skip
+    # the fixture pattern has no check_bindings, so the client withholds the header and the
+    # request then fails to connect (nothing listens on port 9)
+    assert rc == 3
+    assert "abcd-secret" not in capsys.readouterr().err
