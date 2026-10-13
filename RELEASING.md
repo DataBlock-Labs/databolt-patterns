@@ -1,14 +1,14 @@
 # Releasing
 
 Releases are cut from `main` by pushing a tag. The tag must equal `v` + the version in
-`src/databolt/patterns/_version.py` (for example `v0.1.0`, or `v0.2.0a1` for a pre-release).
+`src/databolt/patterns/_version.py` (for example `v0.1.1`, or `v0.2.0a1` for a pre-release).
 
 ```bash
 # 1. bump src/databolt/patterns/_version.py and CHANGELOG.md in a PR; merge it with CI green
 # 2. tag the merge commit
 git checkout main && git pull
-git tag -a v0.1.0 -m "v0.1.0"
-git push origin v0.1.0
+git tag -a v0.1.1 -m "v0.1.1"
+git push origin v0.1.1
 ```
 
 The `Release` workflow then:
@@ -57,5 +57,5 @@ fails at the GitHub-release step because the release already exists; delete the 
 Every tag is installable straight from git:
 
 ```bash
-pip install "databolt-standard-patterns @ git+https://github.com/DataBlock-Labs/databolt-standard-patterns@v0.1.0"
+pip install "databolt-standard-patterns @ git+https://github.com/DataBlock-Labs/databolt-standard-patterns@v0.1.1"
 ```

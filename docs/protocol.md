@@ -144,5 +144,5 @@ Messages are redacted. Every secret value from the request, the derived Basic-au
 
 ```bash
 python -I -m databolt.patterns version --json
-# {"package": "databolt-standard-patterns", "version": "0.1.0", "protocol": 1, "manifest_version": 1, "python": "3.12.3"}
+# {"package": "databolt-standard-patterns", "version": "0.1.1", "protocol": 1, "manifest_version": 1, "python": "3.12.3"}
 ```

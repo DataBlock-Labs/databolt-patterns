@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-13
+
+0.1.0 is superseded and must not be used: it can attach credentials to cross-origin
+pagination links and ignores Studio's `secret_hosts` bindings. 0.1.0 is never published to
+PyPI.
+
 ### Security
 
 - **Credential binding.** Credentials could previously reach another origin through a
