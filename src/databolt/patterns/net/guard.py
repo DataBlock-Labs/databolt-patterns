@@ -136,7 +136,15 @@ class EgressGuard:
         """Resolve `host` and return its addresses; refuse if any is blocked."""
         self.check_host(host)
         h = _strip_host(host)
-        ips = [h] if _is_ip(h) else self.resolver(h, port)
+        legacy = _legacy_ipv4(h)
+        if _is_ip(h):
+            ips = [h]
+        elif legacy is not None:
+            # 2130706433, 0x7f.1, 017700000001: inet_aton forms some resolvers accept and
+            # others reject. Decide them here so the outcome is the same on every OS.
+            ips = [legacy]
+        else:
+            ips = self.resolver(h, port)
         if not ips:
             raise EgressBlocked(f"Blocked host {h!r} (no addresses)")
         if not self.policy.allow_private:
@@ -164,6 +172,34 @@ class EgressGuard:
     def check_peer(self, ip: str) -> None:
         if not self.policy.allow_private and self.ip_blocked(ip):
             raise EgressBlocked("Blocked peer address after connect (DNS rebinding?)")
+
+
+def _legacy_ipv4(host: str) -> str | None:
+    """Parse inet_aton-style IPv4 (1-4 parts, decimal/0x-hex/0-octal), else None."""
+    parts = host.split(".")
+    if not 1 <= len(parts) <= 4 or not all(parts):
+        return None
+    nums: list[int] = []
+    for part in parts:
+        try:
+            if part.lower().startswith("0x"):
+                nums.append(int(part[2:] or "0", 16))
+            elif len(part) > 1 and part.startswith("0"):
+                nums.append(int(part, 8))
+            elif part.isdigit():
+                nums.append(int(part))
+            else:
+                return None
+        except ValueError:
+            return None
+    *head, last = nums
+    if any(n > 255 for n in head) or last >= 256 ** (4 - len(head)):
+        return None
+    value = 0
+    for n in head:
+        value = value * 256 + n
+    value = value * 256 ** (4 - len(head)) + last
+    return str(ipaddress.IPv4Address(value))
 
 
 def _is_ip(host: str) -> bool:

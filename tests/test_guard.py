@@ -77,6 +77,9 @@ def test_ip_allowed(ip: str) -> None:
         "http://metadata.google.internal/",
         "http://printer.local/",
         "http://2130706433/",  # 127.0.0.1 as a decimal integer
+        "http://0x7f.1/",  # inet_aton hex + short form
+        "http://017700000001/",  # octal
+        "http://10.1/",  # 10.0.0.1 short form
     ],
 )
 def test_check_url_blocks_private_destinations(url: str) -> None:
@@ -230,3 +233,14 @@ def test_unwrap_ipv4_is_configurable() -> None:
     assert not no_unwrap.ip_blocked("::ffff:127.0.0.1")
     assert no_unwrap.ip_blocked("::1")  # still blocked as itself
     assert EgressGuard().ip_blocked("::ffff:7f00:1")
+
+
+@pytest.mark.parametrize(
+    ("host", "ip"),
+    [("2130706433", "127.0.0.1"), ("0x7f.1", "127.0.0.1"), ("1.2.3", "1.2.0.3"),
+     ("8.8.8.8", "8.8.8.8"), ("example.com", None), ("1.2.3.4.5", None), ("256.1.1.1", None)],
+)  # fmt: skip
+def test_legacy_ipv4_forms(host: str, ip: str | None) -> None:
+    from databolt.patterns.net.guard import _legacy_ipv4
+
+    assert _legacy_ipv4(host) == ip
