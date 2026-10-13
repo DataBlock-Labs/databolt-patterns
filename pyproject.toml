@@ -29,6 +29,7 @@ classifiers = [
 dependencies = [
   "httpx>=0.27,<1",
   "httpcore>=1.0,<2",
+  "certifi",
   "pydantic>=2.6,<3",
   "pyyaml>=6.0",
 ]
@@ -92,7 +93,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S", "B011"]
+"tests/**" = ["S", "B011", "PT018"]
 "examples/**" = ["S"]
 
 [tool.ruff.lint.isort]
