@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: ruff + mypy --strict
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - name: Every action is pinned to a commit SHA
+        run: python scripts/check_action_pins.py
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: mypy
+
+  test:
+    name: pytest (${{ matrix.os }}, ${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          - os: macos-latest
+            python: "3.13"
+          - os: windows-latest
+            python: "3.13"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ".[dev]"
+      - name: Install the example entry-point package
+        if: hashFiles('examples/entrypoint_pkg/pyproject.toml') != ''
+        run: pip install -e examples/entrypoint_pkg
+      - run: pytest
+        env:
+          DATABOLT_REQUIRE_EXAMPLE_PKG: "1"
+
+  build:
+    name: build sdist + wheel
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip build twine
+      - run: python -m build
+      - run: twine check --strict dist/*
+      - name: Fail if the wheel ships a namespace __init__.py
+        run: python scripts/check_wheel.py dist
+      - name: Smoke-test the wheel in a clean venv
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install dist/*.whl
+          cd /tmp && /tmp/smoke/bin/python -c "from databolt.ingestion import api; import databolt.patterns as p; print(p.__version__)"
+          /tmp/smoke/bin/databolt-patterns version --json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/

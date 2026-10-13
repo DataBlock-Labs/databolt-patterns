@@ -1,0 +1,117 @@
+name: Release
+
+# Push a tag `vX.Y.Z` (or `vX.Y.ZaN`) to build, attach the artifacts to a GitHub
+# release, then publish to TestPyPI and PyPI through trusted publishing.
+#
+# Publishing is gated on the repository variable PYPI_PUBLISH == "true". Until the
+# one-time trusted-publisher setup in RELEASING.md is done and that variable is
+# set, a tag still builds and creates the GitHub release; the publish jobs are
+# skipped instead of failing.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip build twine
+      - name: Tag must match the package version
+        run: |
+          version=$(python -c "import re,pathlib;print(re.search(r'\"(.+)\"', pathlib.Path('src/databolt/patterns/_version.py').read_text()).group(1))")
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match package version ${version}"
+            exit 1
+          fi
+      - run: python -m build
+      - run: twine check --strict dist/*
+      - run: python scripts/check_wheel.py dist
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dist
+          path: dist/
+
+  github-release:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          flags="--generate-notes --verify-tag"
+          case "${GITHUB_REF_NAME}" in *a*|*b*|*rc*) flags="$flags --prerelease";; esac
+          gh release create "${GITHUB_REF_NAME}" dist/* --repo "${GITHUB_REPOSITORY}" $flags
+
+  publish-gate:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      enabled: ${{ steps.gate.outputs.enabled }}
+    steps:
+      - id: gate
+        env:
+          PYPI_PUBLISH: ${{ vars.PYPI_PUBLISH }}
+        run: |
+          if [ "${PYPI_PUBLISH}" = "true" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::PyPI publishing skipped: set the repository variable PYPI_PUBLISH=true after the trusted-publisher setup in RELEASING.md"
+          fi
+
+  testpypi:
+    needs: [build, publish-gate]
+    if: needs.publish-gate.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/databolt-standard-patterns
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  pypi:
+    needs: [testpypi, publish-gate]
+    if: needs.publish-gate.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: pypi
+      url: https://pypi.org/p/databolt-standard-patterns
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
