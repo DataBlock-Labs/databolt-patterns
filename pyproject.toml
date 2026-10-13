@@ -52,6 +52,11 @@ dev = [
 [project.scripts]
 databolt-patterns = "databolt.patterns.cli:main"
 
+# Built-in patterns register through the same group third-party packages use.
+[project.entry-points."databolt.patterns"]
+rest = "databolt.ingestion.api.rest:RestApiPattern"
+http_get = "databolt.ingestion.api.http_get:HttpGetPattern"
+
 [project.urls]
 Homepage = "https://github.com/DataBlock-Labs/databolt-standard-patterns"
 Documentation = "https://github.com/DataBlock-Labs/databolt-standard-patterns/tree/main/docs"
@@ -95,6 +100,10 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S", "B011", "PT018"]
 "examples/**" = ["S"]
+# Secret fields default to `${secrets.x}` references, which S105/S107 mistake for passwords.
+"src/databolt/ingestion/api/auth.py" = ["S105", "S107"]
+# Pattern metadata (capabilities) is declared as plain class-level dicts by design.
+"src/databolt/ingestion/**" = ["RUF012"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["databolt"]

@@ -1,0 +1,28 @@
+# USGS earthquakes (FDSN event web service), loaded incrementally.
+#
+#   databolt-patterns run databolt.ingestion.api.rest -c examples/usgs_earthquakes.yaml \
+#       --state out/usgs-state.json --out out/usgs
+#
+# The first run starts at `initial_value`. Each run proposes the newest event time as the
+# cursor; the CLI commits it to --state only after the output file is written. The next
+# run sends it as `starttime`, so it lands only newer events (range_start: open drops the
+# boundary event the inclusive `starttime` filter returns again).
+client:
+  base_url: https://earthquake.usgs.gov/fdsnws/event/1/
+  paginator:
+    type: offset
+    offset: 1          # FDSN offsets are 1-based
+    limit: 1000
+resource:
+  path: query
+  params:
+    format: geojson
+    orderby: time-asc  # ascending, so even a truncated run may advance the cursor
+  data_selector: features
+  incremental:
+    param: starttime
+    cursor_path: properties.time
+    initial_value: "2026-10-01T00:00:00Z"
+    transform: epoch_ms_to_iso
+    order: asc
+max_pages: 20

@@ -52,7 +52,12 @@ def _step(values: list[Any], token: str) -> list[Any]:
 
 
 def get_path(data: Any, path: str | None) -> Any:
-    """The single value at `path`, or None. A `[*]` path returns the fanned-out list."""
+    """The single value at `path`, or None. A `[*]` path returns the fanned-out list.
+
+    A top-level key that itself contains dots (`@odata.nextLink`) is matched literally first.
+    """
+    if isinstance(data, dict) and path and path in data:
+        return data[path]
     tokens = parse_path(path)
     values = [data]
     fanned = False
