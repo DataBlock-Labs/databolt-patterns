@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "databolt-example-patterns"
+version = "0.1.0"
+description = "Example: shipping DataBolt patterns in a pip package via entry points"
+requires-python = ">=3.10"
+dependencies = ["databolt-standard-patterns"]
+
+# DataBolt discovers patterns through this entry-point group. Each value points at a
+# @pattern function, a Pattern subclass, or a list of them.
+[project.entry-points."databolt.patterns"]
+countdown = "databolt_example_patterns:countdown"
+more = "databolt_example_patterns:PATTERNS"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/databolt_example_patterns"]

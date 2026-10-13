@@ -64,7 +64,7 @@ class Registry:
             p.origin = origin
         if provider:
             p.provider_name, p.provider_version = provider
-        elif not p.provider_name:
+        elif not p.provider_name and p.origin != "custom":
             p.provider_name, p.provider_version = DIST_NAME, __version__
         existing = self._patterns.get(p.id)
         if existing is not None and not replace:
@@ -94,17 +94,58 @@ class Registry:
 
     # -- custom patterns -------------------------------------------------------------
 
-    def load_yaml_text(self, text: str) -> Pattern:
-        raise ValidationError("custom YAML patterns are not supported by this version")
+    def load_yaml_text(self, text: str, *, source: str = "") -> Pattern:
+        """A `kind: databolt.pattern/v1` pattern from YAML text (not registered)."""
+        from databolt.patterns.custom import load_yaml_pattern
+
+        return load_yaml_pattern(text, self, source=source)
 
     def load_yaml_file(self, path: str) -> Pattern:
-        raise ValidationError("custom YAML patterns are not supported by this version")
+        from pathlib import Path
+
+        try:
+            text = Path(path).read_text(encoding="utf-8")
+        except OSError as e:
+            raise ValidationError(f"cannot read {path}: {e.strerror}") from None
+        return self.load_yaml_text(text, source=Path(path).name)
 
     def load_python_file(self, path: str, *, entry: str | None, sha256: str | None) -> Pattern:
-        raise ValidationError("custom Python pattern files are not supported by this version")
+        """A trusted Python pattern file. `sha256` must match the file's bytes."""
+        from databolt.patterns.custom import load_python_patterns
 
-    def load_custom_dir(self, path: str) -> None:
-        raise ValidationError("custom pattern directories are not supported by this version")
+        if not sha256:
+            raise ValidationError("a Python pattern file needs the sha256 the caller trusted")
+        found = load_python_patterns(path, sha256=sha256, entry=entry)
+        if len(found) > 1:
+            ids = ", ".join(p.id for p in found)
+            raise ValidationError(f"{path} defines several patterns ({ids}); pass an entry")
+        return found[0]
+
+    def load_custom_dir(self, path: str, *, trust_python: bool = False) -> None:
+        """Register every custom pattern in `path`. YAML always; `.py` files only with
+        `trust_python` (they are code). Failures become warnings."""
+        from pathlib import Path
+
+        from databolt.patterns.custom import load_python_patterns, sha256_of
+
+        root = Path(path)
+        if not root.is_dir():
+            raise ValidationError(f"{path} is not a directory")
+        for f in sorted(root.iterdir()):
+            try:
+                if f.suffix in (".yaml", ".yml"):
+                    self.register(self.load_yaml_file(str(f)), origin="custom", replace=True)
+                elif f.suffix == ".py":
+                    if not trust_python:
+                        self.warnings.append(
+                            f"skipped {f.name}: Python patterns load only with --trust-python "
+                            "(or by path)"
+                        )
+                        continue
+                    for p in load_python_patterns(f, sha256=sha256_of(f)):
+                        self.register(p, origin="custom", replace=True)
+            except ValidationError as e:
+                self.warnings.append(f"{f.name}: {e.message}")
 
     # -- discovery -------------------------------------------------------------------
 
