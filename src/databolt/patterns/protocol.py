@@ -86,8 +86,6 @@ def resolve_pattern(ref: PatternRef, registry: Registry) -> Pattern:
     if ref.yaml:
         return registry.load_yaml_text(ref.yaml)
     assert ref.file
-    if not ref.sha256:
-        raise ValidationError("a Python pattern file needs the sha256 the caller trusted")
     return registry.load_python_file(ref.file, entry=ref.entry, sha256=ref.sha256)
 
 

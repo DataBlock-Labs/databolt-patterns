@@ -6,8 +6,28 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-13
+
+First release.
+
 ### Added
 
+- Custom patterns:
+  - **YAML** (`kind: databolt.pattern/v1`). A pattern extends an installed pattern
+    (`extends`, `extends_version`), exposes typed `params`, and supplies a `config` in which
+    `${params.*}` renders at bind time and `${secrets.*}` and `${state.*}` render at run time.
+    The config is validated against the base pattern at load time.
+  - **Python files.** A file is executed only when its bytes match the trusted sha256, and
+    the verified bytes are what run. An `entry` selects the pattern when a file defines more
+    than one.
+  - **Directories.** `--custom DIR` loads every YAML pattern in a directory; `.py` files load
+    only with `--trust-python`.
+  - **Packages.** Patterns are discovered through the `databolt.patterns` entry points;
+    `examples/entrypoint_pkg` shows how, and CI installs it.
+- Examples: `custom_pattern.py` (Hacker News) and `pokemon_custom.yaml`.
+- Authoring docs for YAML, Python and packages.
+- In `run`, the CLI sends anything a pattern prints to stderr, so stdout holds only the
+  result.
 - `databolt.ingestion.api`, the standard library:
   - `rest` (`databolt.ingestion.api.rest@1.0.0`). Its params are shaped like dlt's
     (`client` and `resource`) and it supports five auth types and eight paginators,

@@ -1,0 +1,41 @@
+# A custom YAML pattern: the REST pattern, pre-configured for PokeAPI, exposing only the
+# params a user should touch. It runs no code of its own.
+#
+#   databolt-patterns validate examples/pokemon_custom.yaml
+#   databolt-patterns run examples/pokemon_custom.yaml --param resource=berry --out out/berries
+kind: databolt.pattern/v1
+id: example.pokeapi
+version: 1.0.0
+title: PokeAPI resource
+description: Any PokeAPI list endpoint (pokemon, berry, move, ...), all pages.
+icon: sparkles
+extends: databolt.ingestion.api.rest
+extends_version: "^1"
+params:
+  resource:
+    type: string
+    title: Resource
+    enum: [pokemon, berry, move, ability, type]
+    default: pokemon
+  page_size:
+    type: integer
+    default: 100
+    minimum: 1
+    maximum: 1000
+  max_pages:
+    type: integer
+    default: 3
+    minimum: 1
+config:
+  client:
+    base_url: https://pokeapi.co/api/v2/
+    paginator: auto
+  resource:
+    path: ${params.resource}
+    params:
+      limit: ${params.page_size}
+    data_selector: results
+  max_pages: ${params.max_pages}
+examples:
+  - title: Berries
+    params: {resource: berry}

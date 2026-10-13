@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -36,7 +37,7 @@ def _registry(args: argparse.Namespace) -> Registry:
 
     reg = default_registry()
     for d in getattr(args, "custom", None) or []:
-        reg.load_custom_dir(d)
+        reg.load_custom_dir(d, trust_python=getattr(args, "trust_python", False))
     return reg
 
 
@@ -225,7 +226,27 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not args.preview:
         stem = "".join(c if c.isalnum() or c in "-_" else "_" for c in p.id)
         sink = sink_for(args.format, args.out, table=args.table, stem=stem)
-    result = run(
+    # stdout carries only the result JSON; anything the pattern prints goes to stderr.
+    with contextlib.redirect_stdout(sys.stderr):
+        result = _run_cli(args, p, secrets, redactor, limits, egress, state, sink, run)
+    if args.state and result.state_changed and not args.no_commit and not args.preview:
+        commit_state(args.state, result.state)
+    print(redactor(json.dumps(result.to_dict(), indent=2, default=str)))
+    return 0
+
+
+def _run_cli(
+    args: argparse.Namespace,
+    p: Pattern,
+    secrets: dict[str, str],
+    redactor: Redactor,
+    limits: Limits,
+    egress: EgressPolicy,
+    state: dict[str, Any] | None,
+    sink: Any,
+    run: Any,
+) -> Any:
+    return run(
         p,
         _params(args),
         secrets=secrets,
@@ -236,10 +257,6 @@ def cmd_run(args: argparse.Namespace) -> int:
         preview=args.preview,
         redactor=redactor,
     )
-    if args.state and result.state_changed and not args.no_commit and not args.preview:
-        commit_state(args.state, result.state)
-    print(redactor(json.dumps(result.to_dict(), indent=2, default=str)))
-    return 0
 
 
 def cmd_protocol(args: argparse.Namespace) -> int:
@@ -263,7 +280,12 @@ def build_parser() -> argparse.ArgumentParser:
             "--custom",
             action="append",
             metavar="DIR",
-            help="also load custom .yaml/.py patterns from DIR (repeatable)",
+            help="also load custom .yaml patterns from DIR (repeatable)",
+        )
+        p.add_argument(
+            "--trust-python",
+            action="store_true",
+            help="with --custom, also execute .py patterns found there",
         )
 
     p = sub.add_parser("version", help="print the package and protocol version")
