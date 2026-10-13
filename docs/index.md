@@ -20,7 +20,7 @@
 pip install databolt-standard-patterns              # core: httpx, pydantic, pyyaml
 pip install "databolt-standard-patterns[all]"       # + Parquet (pyarrow) and DuckDB output
 # straight from git, pinned to a release tag:
-pip install "databolt-standard-patterns @ git+https://github.com/DataBlock-Labs/databolt-standard-patterns@v0.1.0"
+pip install "databolt-standard-patterns @ git+https://github.com/DataBlock-Labs/databolt-standard-patterns@v0.1.1"
 ```
 
 ## Three ways to run a pattern

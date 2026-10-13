@@ -3,7 +3,7 @@
   "protocol": 1,
   "package": {
     "name": "databolt-standard-patterns",
-    "version": "0.1.0"
+    "version": "0.1.1"
   },
   "patterns": [
     {
@@ -15,7 +15,7 @@
       "origin": "standard",
       "provider": {
         "name": "databolt-standard-patterns",
-        "version": "0.1.0"
+        "version": "0.1.1"
       },
       "runtime": "python",
       "icon": "download",
@@ -373,7 +373,7 @@
       "origin": "standard",
       "provider": {
         "name": "databolt-standard-patterns",
-        "version": "0.1.0"
+        "version": "0.1.1"
       },
       "runtime": "python",
       "icon": "globe",

@@ -13,7 +13,7 @@ databolt-patterns describe databolt.ingestion.api.rest       # one entry
 {
   "manifest_version": 1,
   "protocol": 1,
-  "package": {"name": "databolt-standard-patterns", "version": "0.1.0"},
+  "package": {"name": "databolt-standard-patterns", "version": "0.1.1"},
   "patterns": [ ...entries, sorted by id... ],
   "warnings": [ "entry point 'x' from acme-patterns failed to load: ..." ]
 }

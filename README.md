@@ -13,7 +13,7 @@ It works on its own as a library and CLI, and it is the Python engine behind Dat
 pip install databolt-standard-patterns           # Python 3.10+
 pip install "databolt-standard-patterns[all]"    # + Parquet and DuckDB output
 # or from a git tag:
-pip install "databolt-standard-patterns @ git+https://github.com/DataBlock-Labs/databolt-standard-patterns@v0.1.0"
+pip install "databolt-standard-patterns @ git+https://github.com/DataBlock-Labs/databolt-standard-patterns@v0.1.1"
 ```
 
 ## Quick start
