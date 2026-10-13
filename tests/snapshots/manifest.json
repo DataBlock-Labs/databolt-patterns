@@ -1,0 +1,1356 @@
+{
+  "manifest_version": 1,
+  "protocol": 1,
+  "package": {
+    "name": "databolt-standard-patterns",
+    "version": "0.1.0a1"
+  },
+  "patterns": [
+    {
+      "id": "databolt.ingestion.api.http_get",
+      "version": "1.0.0",
+      "title": "HTTP GET (single file)",
+      "description": "Fetch one URL and parse it as JSON, NDJSON, CSV or TSV.",
+      "category": "ingestion",
+      "origin": "standard",
+      "provider": {
+        "name": "databolt-standard-patterns",
+        "version": "0.1.0a1"
+      },
+      "runtime": "python",
+      "icon": "download",
+      "params_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$defs": {
+          "ApiKeyAuth": {
+            "additionalProperties": false,
+            "description": "An API key sent in a header or a query parameter.",
+            "properties": {
+              "type": {
+                "const": "api_key",
+                "default": "api_key",
+                "title": "Type",
+                "type": "string"
+              },
+              "name": {
+                "default": "X-API-Key",
+                "description": "Header or query parameter name.",
+                "title": "Name",
+                "type": "string"
+              },
+              "value": {
+                "default": "${secrets.api_key}",
+                "format": "secret-ref",
+                "pattern": "^\\$\\{\\s*secrets\\.[A-Za-z0-9_\\-]+\\s*\\}$",
+                "title": "Value",
+                "type": "string",
+                "x-databolt-ui": {
+                  "widget": "secret-ref"
+                }
+              },
+              "location": {
+                "default": "header",
+                "enum": [
+                  "header",
+                  "query"
+                ],
+                "title": "Location",
+                "type": "string"
+              }
+            },
+            "title": "ApiKeyAuth",
+            "type": "object"
+          },
+          "BearerAuth": {
+            "additionalProperties": false,
+            "description": "`Authorization: Bearer <token>`.",
+            "properties": {
+              "type": {
+                "const": "bearer",
+                "default": "bearer",
+                "title": "Type",
+                "type": "string"
+              },
+              "token": {
+                "default": "${secrets.token}",
+                "format": "secret-ref",
+                "pattern": "^\\$\\{\\s*secrets\\.[A-Za-z0-9_\\-]+\\s*\\}$",
+                "title": "Token",
+                "type": "string",
+                "x-databolt-ui": {
+                  "widget": "secret-ref"
+                }
+              }
+            },
+            "title": "BearerAuth",
+            "type": "object"
+          },
+          "HttpBasicAuth": {
+            "additionalProperties": false,
+            "description": "HTTP Basic: `Authorization: Basic base64(username:password)`.",
+            "properties": {
+              "type": {
+                "const": "http_basic",
+                "default": "http_basic",
+                "title": "Type",
+                "type": "string"
+              },
+              "username": {
+                "description": "Plain text, or a ${secrets.x} reference.",
+                "title": "Username",
+                "type": "string"
+              },
+              "password": {
+                "default": "${secrets.password}",
+                "format": "secret-ref",
+                "pattern": "^\\$\\{\\s*secrets\\.[A-Za-z0-9_\\-]+\\s*\\}$",
+                "title": "Password",
+                "type": "string",
+                "x-databolt-ui": {
+                  "widget": "secret-ref"
+                }
+              }
+            },
+            "required": [
+              "username"
+            ],
+            "title": "HttpBasicAuth",
+            "type": "object"
+          },
+          "NoAuth": {
+            "additionalProperties": false,
+            "description": "No authentication.",
+            "properties": {
+              "type": {
+                "const": "none",
+                "default": "none",
+                "title": "Type",
+                "type": "string"
+              }
+            },
+            "title": "NoAuth",
+            "type": "object"
+          },
+          "OAuth2ClientCredentials": {
+            "additionalProperties": false,
+            "description": "OAuth 2.0 client-credentials grant; the access token is fetched once per run.",
+            "properties": {
+              "type": {
+                "const": "oauth2_client_credentials",
+                "default": "oauth2_client_credentials",
+                "title": "Type",
+                "type": "string"
+              },
+              "token_url": {
+                "title": "Token Url",
+                "type": "string",
+                "x-databolt-ui": {
+                  "placeholder": "https://auth.example.com/token"
+                }
+              },
+              "client_id": {
+                "description": "Plain text, or a ${secrets.x} reference.",
+                "title": "Client Id",
+                "type": "string"
+              },
+              "client_secret": {
+                "default": "${secrets.client_secret}",
+                "format": "secret-ref",
+                "pattern": "^\\$\\{\\s*secrets\\.[A-Za-z0-9_\\-]+\\s*\\}$",
+                "title": "Client Secret",
+                "type": "string",
+                "x-databolt-ui": {
+                  "widget": "secret-ref"
+                }
+              },
+              "scope": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Scope"
+              },
+              "audience": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Audience"
+              },
+              "client_auth": {
+                "default": "basic",
+                "description": "Send client credentials as HTTP Basic (RFC 6749) or in the body.",
+                "enum": [
+                  "basic",
+                  "body"
+                ],
+                "title": "Client Auth",
+                "type": "string"
+              },
+              "extra": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Extra form fields for the token request.",
+                "title": "Extra",
+                "type": "object"
+              }
+            },
+            "required": [
+              "token_url",
+              "client_id"
+            ],
+            "title": "OAuth2ClientCredentials",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "title": "Url",
+            "type": "string",
+            "x-databolt-ui": {
+              "placeholder": "https://example.com/data.csv"
+            }
+          },
+          "format": {
+            "default": "auto",
+            "description": "auto: from the content type, then the URL.",
+            "enum": [
+              "auto",
+              "json",
+              "ndjson",
+              "csv",
+              "tsv"
+            ],
+            "title": "Format",
+            "type": "string"
+          },
+          "data_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "For JSON: dotted path to the records.",
+            "title": "Data Selector"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Headers",
+            "type": "object",
+            "x-databolt-ui": {
+              "advanced": true,
+              "widget": "key-value"
+            }
+          },
+          "params": {
+            "additionalProperties": true,
+            "title": "Params",
+            "type": "object",
+            "x-databolt-ui": {
+              "widget": "key-value"
+            }
+          },
+          "auth": {
+            "discriminator": {
+              "mapping": {
+                "api_key": "#/$defs/ApiKeyAuth",
+                "bearer": "#/$defs/BearerAuth",
+                "http_basic": "#/$defs/HttpBasicAuth",
+                "none": "#/$defs/NoAuth",
+                "oauth2_client_credentials": "#/$defs/OAuth2ClientCredentials"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/NoAuth"
+              },
+              {
+                "$ref": "#/$defs/BearerAuth"
+              },
+              {
+                "$ref": "#/$defs/ApiKeyAuth"
+              },
+              {
+                "$ref": "#/$defs/HttpBasicAuth"
+              },
+              {
+                "$ref": "#/$defs/OAuth2ClientCredentials"
+              }
+            ],
+            "title": "Auth"
+          },
+          "max_records": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Records"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "HTTP GET",
+        "type": "object"
+      },
+      "secrets": [],
+      "defaults": {
+        "format": "auto",
+        "headers": {},
+        "params": {},
+        "auth": {
+          "type": "none"
+        }
+      },
+      "outputs": {
+        "formats": [
+          "ndjson",
+          "parquet",
+          "duckdb"
+        ],
+        "record": "object"
+      },
+      "capabilities": {
+        "auth": [
+          "none",
+          "bearer",
+          "api_key",
+          "http_basic",
+          "oauth2_client_credentials"
+        ],
+        "formats": [
+          "json",
+          "ndjson",
+          "csv",
+          "tsv"
+        ],
+        "pagination": false,
+        "incremental": false,
+        "preview": true,
+        "retries": true
+      },
+      "examples": [
+        {
+          "title": "A public CSV",
+          "params": {
+            "url": "https://example.com/data.csv",
+            "format": "csv"
+          }
+        }
+      ]
+    },
+    {
+      "id": "databolt.ingestion.api.rest",
+      "version": "1.0.0",
+      "title": "REST API",
+      "description": "Pull records from a REST/JSON API. Handles auth, pagination (auto-detected or explicit), retries with backoff on 429/5xx, rate limits and incremental cursors.",
+      "category": "ingestion",
+      "origin": "standard",
+      "provider": {
+        "name": "databolt-standard-patterns",
+        "version": "0.1.0a1"
+      },
+      "runtime": "python",
+      "icon": "globe",
+      "params_schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$defs": {
+          "ApiKeyAuth": {
+            "additionalProperties": false,
+            "description": "An API key sent in a header or a query parameter.",
+            "properties": {
+              "type": {
+                "const": "api_key",
+                "default": "api_key",
+                "title": "Type",
+                "type": "string"
+              },
+              "name": {
+                "default": "X-API-Key",
+                "description": "Header or query parameter name.",
+                "title": "Name",
+                "type": "string"
+              },
+              "value": {
+                "default": "${secrets.api_key}",
+                "format": "secret-ref",
+                "pattern": "^\\$\\{\\s*secrets\\.[A-Za-z0-9_\\-]+\\s*\\}$",
+                "title": "Value",
+                "type": "string",
+                "x-databolt-ui": {
+                  "widget": "secret-ref"
+                }
+              },
+              "location": {
+                "default": "header",
+                "enum": [
+                  "header",
+                  "query"
+                ],
+                "title": "Location",
+                "type": "string"
+              }
+            },
+            "title": "ApiKeyAuth",
+            "type": "object"
+          },
+          "AutoPaginator": {
+            "additionalProperties": false,
+            "description": "Detect pagination from the first response (Link header, next URL, cursor).",
+            "properties": {
+              "type": {
+                "const": "auto",
+                "default": "auto",
+                "title": "Type",
+                "type": "string"
+              }
+            },
+            "title": "AutoPaginator",
+            "type": "object"
+          },
+          "BearerAuth": {
+            "additionalProperties": false,
+            "description": "`Authorization: Bearer <token>`.",
+            "properties": {
+              "type": {
+                "const": "bearer",
+                "default": "bearer",
+                "title": "Type",
+                "type": "string"
+              },
+              "token": {
+                "default": "${secrets.token}",
+                "format": "secret-ref",
+                "pattern": "^\\$\\{\\s*secrets\\.[A-Za-z0-9_\\-]+\\s*\\}$",
+                "title": "Token",
+                "type": "string",
+                "x-databolt-ui": {
+                  "widget": "secret-ref"
+                }
+              }
+            },
+            "title": "BearerAuth",
+            "type": "object"
+          },
+          "ClientConfig": {
+            "additionalProperties": false,
+            "properties": {
+              "base_url": {
+                "description": "API root, e.g. https://api.example.com/v1/",
+                "title": "Base Url",
+                "type": "string",
+                "x-databolt-ui": {
+                  "order": 1,
+                  "placeholder": "https://api.example.com/v1/"
+                }
+              },
+              "headers": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Extra request headers. Values may use ${secrets.x}.",
+                "title": "Headers",
+                "type": "object",
+                "x-databolt-ui": {
+                  "advanced": true,
+                  "widget": "key-value"
+                }
+              },
+              "auth": {
+                "discriminator": {
+                  "mapping": {
+                    "api_key": "#/$defs/ApiKeyAuth",
+                    "bearer": "#/$defs/BearerAuth",
+                    "http_basic": "#/$defs/HttpBasicAuth",
+                    "none": "#/$defs/NoAuth",
+                    "oauth2_client_credentials": "#/$defs/OAuth2ClientCredentials"
+                  },
+                  "propertyName": "type"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/NoAuth"
+                  },
+                  {
+                    "$ref": "#/$defs/BearerAuth"
+                  },
+                  {
+                    "$ref": "#/$defs/ApiKeyAuth"
+                  },
+                  {
+                    "$ref": "#/$defs/HttpBasicAuth"
+                  },
+                  {
+                    "$ref": "#/$defs/OAuth2ClientCredentials"
+                  }
+                ],
+                "title": "Auth",
+                "x-databolt-ui": {
+                  "order": 2
+                }
+              },
+              "paginator": {
+                "discriminator": {
+                  "mapping": {
+                    "auto": "#/$defs/AutoPaginator",
+                    "cursor": "#/$defs/CursorPaginator",
+                    "header_cursor": "#/$defs/HeaderCursorPaginator",
+                    "header_link": "#/$defs/HeaderLinkPaginator",
+                    "json_link": "#/$defs/JsonLinkPaginator",
+                    "offset": "#/$defs/OffsetPaginator",
+                    "page_number": "#/$defs/PageNumberPaginator",
+                    "single_page": "#/$defs/SinglePagePaginator"
+                  },
+                  "propertyName": "type"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/AutoPaginator"
+                  },
+                  {
+                    "$ref": "#/$defs/SinglePagePaginator"
+                  },
+                  {
+                    "$ref": "#/$defs/JsonLinkPaginator"
+                  },
+                  {
+                    "$ref": "#/$defs/HeaderLinkPaginator"
+                  },
+                  {
+                    "$ref": "#/$defs/HeaderCursorPaginator"
+                  },
+                  {
+                    "$ref": "#/$defs/CursorPaginator"
+                  },
+                  {
+                    "$ref": "#/$defs/OffsetPaginator"
+                  },
+                  {
+                    "$ref": "#/$defs/PageNumberPaginator"
+                  }
+                ],
+                "title": "Paginator",
+                "x-databolt-ui": {
+                  "order": 3
+                }
+              }
+            },
+            "required": [
+              "base_url"
+            ],
+            "title": "ClientConfig",
+            "type": "object"
+          },
+          "CursorPaginator": {
+            "additionalProperties": false,
+            "description": "The body carries the next cursor; it is sent back as a query param or body field.",
+            "properties": {
+              "type": {
+                "const": "cursor",
+                "default": "cursor",
+                "title": "Type",
+                "type": "string"
+              },
+              "cursor_path": {
+                "default": "next_cursor",
+                "description": "Dotted path to the cursor in the body.",
+                "title": "Cursor Path",
+                "type": "string"
+              },
+              "cursor_param": {
+                "default": "cursor",
+                "description": "Query param (or body field) to send it as.",
+                "title": "Cursor Param",
+                "type": "string"
+              },
+              "location": {
+                "default": "query",
+                "enum": [
+                  "query",
+                  "json"
+                ],
+                "title": "Location",
+                "type": "string"
+              }
+            },
+            "title": "CursorPaginator",
+            "type": "object"
+          },
+          "HeaderCursorPaginator": {
+            "additionalProperties": false,
+            "description": "A response header carries the next cursor; it is sent back as a query param.",
+            "properties": {
+              "type": {
+                "const": "header_cursor",
+                "default": "header_cursor",
+                "title": "Type",
+                "type": "string"
+              },
+              "cursor_header": {
+                "default": "X-Next-Cursor",
+                "title": "Cursor Header",
+                "type": "string"
+              },
+              "cursor_param": {
+                "default": "cursor",
+                "title": "Cursor Param",
+                "type": "string"
+              }
+            },
+            "title": "HeaderCursorPaginator",
+            "type": "object"
+          },
+          "HeaderLinkPaginator": {
+            "additionalProperties": false,
+            "description": "RFC 8288 `Link` header (GitHub style).",
+            "properties": {
+              "type": {
+                "const": "header_link",
+                "default": "header_link",
+                "title": "Type",
+                "type": "string"
+              },
+              "rel": {
+                "default": "next",
+                "title": "Rel",
+                "type": "string"
+              }
+            },
+            "title": "HeaderLinkPaginator",
+            "type": "object"
+          },
+          "HttpBasicAuth": {
+            "additionalProperties": false,
+            "description": "HTTP Basic: `Authorization: Basic base64(username:password)`.",
+            "properties": {
+              "type": {
+                "const": "http_basic",
+                "default": "http_basic",
+                "title": "Type",
+                "type": "string"
+              },
+              "username": {
+                "description": "Plain text, or a ${secrets.x} reference.",
+                "title": "Username",
+                "type": "string"
+              },
+              "password": {
+                "default": "${secrets.password}",
+                "format": "secret-ref",
+                "pattern": "^\\$\\{\\s*secrets\\.[A-Za-z0-9_\\-]+\\s*\\}$",
+                "title": "Password",
+                "type": "string",
+                "x-databolt-ui": {
+                  "widget": "secret-ref"
+                }
+              }
+            },
+            "required": [
+              "username"
+            ],
+            "title": "HttpBasicAuth",
+            "type": "object"
+          },
+          "IncrementalConfig": {
+            "additionalProperties": false,
+            "properties": {
+              "cursor_path": {
+                "description": "Dotted path to the cursor field in each record.",
+                "title": "Cursor Path",
+                "type": "string"
+              },
+              "param": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Query param that receives the start value (e.g. starttime).",
+                "title": "Param"
+              },
+              "initial_value": {
+                "default": null,
+                "description": "Start value for the first run.",
+                "title": "Initial Value"
+              },
+              "transform": {
+                "default": "none",
+                "description": "How to read the record's cursor value: as-is, an ISO-8601 string, or epoch milliseconds/seconds (sent to the API as ISO-8601).",
+                "enum": [
+                  "none",
+                  "iso8601",
+                  "epoch_ms_to_iso",
+                  "epoch_s_to_iso"
+                ],
+                "title": "Transform",
+                "type": "string"
+              },
+              "order": {
+                "default": "unordered",
+                "description": "Order the API returns records in. Only 'asc' lets a truncated run advance the cursor.",
+                "enum": [
+                  "asc",
+                  "desc",
+                  "unordered"
+                ],
+                "title": "Order",
+                "type": "string"
+              },
+              "lookback": {
+                "default": 0,
+                "description": "Re-read this many seconds (or units) before the cursor.",
+                "minimum": 0,
+                "title": "Lookback",
+                "type": "number"
+              },
+              "range_start": {
+                "default": "open",
+                "description": "'open' drops records equal to the committed cursor on a resumed run.",
+                "enum": [
+                  "open",
+                  "closed"
+                ],
+                "title": "Range Start",
+                "type": "string"
+              }
+            },
+            "required": [
+              "cursor_path"
+            ],
+            "title": "IncrementalConfig",
+            "type": "object"
+          },
+          "JsonLinkPaginator": {
+            "additionalProperties": false,
+            "description": "The body holds the next page's URL (e.g. `{\"next\": \"https://.../?page=2\"}`).",
+            "properties": {
+              "type": {
+                "const": "json_link",
+                "default": "json_link",
+                "title": "Type",
+                "type": "string"
+              },
+              "next_url_path": {
+                "default": "next",
+                "description": "Dotted path to the next URL in the body.",
+                "title": "Next Url Path",
+                "type": "string"
+              }
+            },
+            "title": "JsonLinkPaginator",
+            "type": "object"
+          },
+          "NoAuth": {
+            "additionalProperties": false,
+            "description": "No authentication.",
+            "properties": {
+              "type": {
+                "const": "none",
+                "default": "none",
+                "title": "Type",
+                "type": "string"
+              }
+            },
+            "title": "NoAuth",
+            "type": "object"
+          },
+          "OAuth2ClientCredentials": {
+            "additionalProperties": false,
+            "description": "OAuth 2.0 client-credentials grant; the access token is fetched once per run.",
+            "properties": {
+              "type": {
+                "const": "oauth2_client_credentials",
+                "default": "oauth2_client_credentials",
+                "title": "Type",
+                "type": "string"
+              },
+              "token_url": {
+                "title": "Token Url",
+                "type": "string",
+                "x-databolt-ui": {
+                  "placeholder": "https://auth.example.com/token"
+                }
+              },
+              "client_id": {
+                "description": "Plain text, or a ${secrets.x} reference.",
+                "title": "Client Id",
+                "type": "string"
+              },
+              "client_secret": {
+                "default": "${secrets.client_secret}",
+                "format": "secret-ref",
+                "pattern": "^\\$\\{\\s*secrets\\.[A-Za-z0-9_\\-]+\\s*\\}$",
+                "title": "Client Secret",
+                "type": "string",
+                "x-databolt-ui": {
+                  "widget": "secret-ref"
+                }
+              },
+              "scope": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Scope"
+              },
+              "audience": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Audience"
+              },
+              "client_auth": {
+                "default": "basic",
+                "description": "Send client credentials as HTTP Basic (RFC 6749) or in the body.",
+                "enum": [
+                  "basic",
+                  "body"
+                ],
+                "title": "Client Auth",
+                "type": "string"
+              },
+              "extra": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Extra form fields for the token request.",
+                "title": "Extra",
+                "type": "object"
+              }
+            },
+            "required": [
+              "token_url",
+              "client_id"
+            ],
+            "title": "OAuth2ClientCredentials",
+            "type": "object"
+          },
+          "OffsetPaginator": {
+            "additionalProperties": false,
+            "description": "`?offset=N&limit=M`. Stops on a short or empty page, `total_path`, or `maximum_offset`.",
+            "properties": {
+              "type": {
+                "const": "offset",
+                "default": "offset",
+                "title": "Type",
+                "type": "string"
+              },
+              "limit": {
+                "default": 100,
+                "description": "Page size.",
+                "minimum": 1,
+                "title": "Limit",
+                "type": "integer"
+              },
+              "offset": {
+                "default": 0,
+                "description": "First offset (the base): 0 for most APIs, 1 for e.g. USGS FDSN.",
+                "minimum": 0,
+                "title": "Offset",
+                "type": "integer"
+              },
+              "offset_param": {
+                "default": "offset",
+                "title": "Offset Param",
+                "type": "string"
+              },
+              "limit_param": {
+                "default": "limit",
+                "title": "Limit Param",
+                "type": "string"
+              },
+              "total_path": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Dotted path to the total record count.",
+                "title": "Total Path"
+              },
+              "maximum_offset": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Maximum Offset"
+              }
+            },
+            "title": "OffsetPaginator",
+            "type": "object"
+          },
+          "PageNumberPaginator": {
+            "additionalProperties": false,
+            "description": "`?page=N`. Stops on an empty or short page, `total_path` (pages), or `maximum_page`.",
+            "properties": {
+              "type": {
+                "const": "page_number",
+                "default": "page_number",
+                "title": "Type",
+                "type": "string"
+              },
+              "base_page": {
+                "default": 1,
+                "minimum": 0,
+                "title": "Base Page",
+                "type": "integer"
+              },
+              "page_param": {
+                "default": "page",
+                "title": "Page Param",
+                "type": "string"
+              },
+              "page_size": {
+                "anyOf": [
+                  {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Page Size"
+              },
+              "page_size_param": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Page Size Param"
+              },
+              "total_path": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Dotted path to the total page count.",
+                "title": "Total Path"
+              },
+              "maximum_page": {
+                "anyOf": [
+                  {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Maximum Page"
+              }
+            },
+            "title": "PageNumberPaginator",
+            "type": "object"
+          },
+          "ResourceConfig": {
+            "additionalProperties": false,
+            "properties": {
+              "path": {
+                "default": "",
+                "description": "Path under base_url (or an absolute URL).",
+                "title": "Path",
+                "type": "string",
+                "x-databolt-ui": {
+                  "order": 1
+                }
+              },
+              "method": {
+                "default": "GET",
+                "enum": [
+                  "GET",
+                  "POST"
+                ],
+                "title": "Method",
+                "type": "string"
+              },
+              "params": {
+                "additionalProperties": true,
+                "description": "Query parameters. Values may use ${secrets.x} and ${state.cursor}.",
+                "title": "Params",
+                "type": "object",
+                "x-databolt-ui": {
+                  "widget": "key-value"
+                }
+              },
+              "json": {
+                "default": null,
+                "description": "JSON request body (POST).",
+                "title": "Json",
+                "x-databolt-ui": {
+                  "advanced": true,
+                  "language": "json",
+                  "widget": "code"
+                }
+              },
+              "data_selector": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Dotted path to the records, e.g. results or data.items[*]. Empty: the body itself if it is a list, else the first list under a common key.",
+                "title": "Data Selector",
+                "x-databolt-ui": {
+                  "placeholder": "results"
+                }
+              },
+              "paginator": {
+                "anyOf": [
+                  {
+                    "discriminator": {
+                      "mapping": {
+                        "auto": "#/$defs/AutoPaginator",
+                        "cursor": "#/$defs/CursorPaginator",
+                        "header_cursor": "#/$defs/HeaderCursorPaginator",
+                        "header_link": "#/$defs/HeaderLinkPaginator",
+                        "json_link": "#/$defs/JsonLinkPaginator",
+                        "offset": "#/$defs/OffsetPaginator",
+                        "page_number": "#/$defs/PageNumberPaginator",
+                        "single_page": "#/$defs/SinglePagePaginator"
+                      },
+                      "propertyName": "type"
+                    },
+                    "oneOf": [
+                      {
+                        "$ref": "#/$defs/AutoPaginator"
+                      },
+                      {
+                        "$ref": "#/$defs/SinglePagePaginator"
+                      },
+                      {
+                        "$ref": "#/$defs/JsonLinkPaginator"
+                      },
+                      {
+                        "$ref": "#/$defs/HeaderLinkPaginator"
+                      },
+                      {
+                        "$ref": "#/$defs/HeaderCursorPaginator"
+                      },
+                      {
+                        "$ref": "#/$defs/CursorPaginator"
+                      },
+                      {
+                        "$ref": "#/$defs/OffsetPaginator"
+                      },
+                      {
+                        "$ref": "#/$defs/PageNumberPaginator"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Overrides client.paginator for this resource.",
+                "title": "Paginator"
+              },
+              "incremental": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/IncrementalConfig"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "response_actions": {
+                "items": {
+                  "$ref": "#/$defs/ResponseAction"
+                },
+                "title": "Response Actions",
+                "type": "array",
+                "x-databolt-ui": {
+                  "advanced": true
+                }
+              }
+            },
+            "title": "ResourceConfig",
+            "type": "object"
+          },
+          "ResponseAction": {
+            "additionalProperties": false,
+            "description": "What to do with a matching response instead of failing. Today: `ignore`, which\ntreats the page as empty and stops paginating (e.g. a 404 for \"no data yet\").",
+            "properties": {
+              "status_code": {
+                "anyOf": [
+                  {
+                    "maximum": 599,
+                    "minimum": 100,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Status Code"
+              },
+              "content": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Match when the body contains this text.",
+                "title": "Content"
+              },
+              "action": {
+                "const": "ignore",
+                "default": "ignore",
+                "title": "Action",
+                "type": "string"
+              }
+            },
+            "title": "ResponseAction",
+            "type": "object"
+          },
+          "SinglePagePaginator": {
+            "additionalProperties": false,
+            "description": "One request, no pagination.",
+            "properties": {
+              "type": {
+                "const": "single_page",
+                "default": "single_page",
+                "title": "Type",
+                "type": "string"
+              }
+            },
+            "title": "SinglePagePaginator",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "description": "Params of `databolt.ingestion.api.rest`.",
+        "properties": {
+          "client": {
+            "$ref": "#/$defs/ClientConfig"
+          },
+          "resource": {
+            "$ref": "#/$defs/ResourceConfig"
+          },
+          "max_pages": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Stop after this many pages.",
+            "title": "Max Pages"
+          },
+          "max_records": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Stop after this many records.",
+            "title": "Max Records"
+          },
+          "requests_per_second": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Client-side rate limit.",
+            "title": "Requests Per Second",
+            "x-databolt-ui": {
+              "advanced": true
+            }
+          }
+        },
+        "required": [
+          "client"
+        ],
+        "title": "REST API",
+        "type": "object"
+      },
+      "secrets": [
+        {
+          "name": "token",
+          "description": "Referenced by ${secrets.<name>} in params; any name works.",
+          "required": false
+        }
+      ],
+      "defaults": {
+        "resource": {
+          "path": "",
+          "method": "GET",
+          "params": {},
+          "response_actions": []
+        }
+      },
+      "outputs": {
+        "formats": [
+          "ndjson",
+          "parquet",
+          "duckdb"
+        ],
+        "record": "object"
+      },
+      "capabilities": {
+        "auth": [
+          "none",
+          "bearer",
+          "api_key",
+          "http_basic",
+          "oauth2_client_credentials"
+        ],
+        "pagination": [
+          "auto",
+          "single_page",
+          "json_link",
+          "header_link",
+          "header_cursor",
+          "cursor",
+          "offset",
+          "page_number"
+        ],
+        "incremental": true,
+        "preview": true,
+        "retries": true,
+        "rate_limit": true,
+        "methods": [
+          "GET",
+          "POST"
+        ]
+      },
+      "examples": [
+        {
+          "title": "PokeAPI (auto pagination)",
+          "params": {
+            "client": {
+              "base_url": "https://pokeapi.co/api/v2/",
+              "paginator": "auto"
+            },
+            "resource": {
+              "path": "pokemon",
+              "params": {
+                "limit": 100
+              }
+            },
+            "max_pages": 3
+          }
+        },
+        {
+          "title": "USGS earthquakes (incremental)",
+          "params": {
+            "client": {
+              "base_url": "https://earthquake.usgs.gov/fdsnws/event/1/"
+            },
+            "resource": {
+              "path": "query",
+              "params": {
+                "format": "geojson",
+                "orderby": "time-asc"
+              },
+              "data_selector": "features",
+              "paginator": {
+                "type": "offset",
+                "offset": 1,
+                "limit": 1000
+              },
+              "incremental": {
+                "param": "starttime",
+                "cursor_path": "properties.time",
+                "initial_value": "2026-10-01T00:00:00Z",
+                "transform": "epoch_ms_to_iso",
+                "order": "asc"
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "warnings": []
+}

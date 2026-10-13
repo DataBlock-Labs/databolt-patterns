@@ -1,0 +1,22 @@
+# GitHub: repositories of an organisation, paginated by the RFC 8288 `Link` header.
+#
+#   databolt-patterns run databolt.ingestion.api.rest -c examples/github_repos.yaml \
+#       --secret github_token=@env:GITHUB_TOKEN --out out/github
+#
+# Without a token, drop the `auth` block (GitHub allows 60 unauthenticated requests/hour).
+client:
+  base_url: https://api.github.com/
+  headers:
+    Accept: application/vnd.github+json
+    X-GitHub-Api-Version: "2022-11-28"
+  auth:
+    type: bearer
+    token: ${secrets.github_token}
+  paginator:
+    type: header_link
+resource:
+  path: orgs/python/repos
+  params:
+    per_page: 100
+    type: public
+max_pages: 2

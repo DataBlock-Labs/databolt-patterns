@@ -1,0 +1,14 @@
+# PokeAPI: no auth, JSON-link pagination (`next` in the body), auto-detected.
+#
+#   databolt-patterns run databolt.ingestion.api.rest -c examples/pokeapi.yaml --out out/pokeapi
+#
+# Expect 300 rows over 3 pages, paginator_detected=json_link, truncated=true.
+client:
+  base_url: https://pokeapi.co/api/v2/
+  paginator: auto
+resource:
+  path: pokemon
+  params:
+    limit: 100
+  data_selector: results
+max_pages: 3

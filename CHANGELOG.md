@@ -8,6 +8,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `databolt.ingestion.api`, the standard library:
+  - `rest` (`databolt.ingestion.api.rest@1.0.0`). Its params are shaped like dlt's
+    (`client` and `resource`) and it supports five auth types and eight paginators,
+    including `auto` detection. It also covers incremental cursors (proposals,
+    open/closed range, lookback, the truncated-descending rule), response actions,
+    same-origin-only credentials and a rate limit.
+  - `http_get` (`databolt.ingestion.api.http_get@1.0.0`) for a single JSON, NDJSON, CSV
+    or TSV URL.
+  - Functional (`api.rest(...)`), class (`api.RestApiPattern(cfg)`) and CLI forms.
+- Examples: PokeAPI, USGS earthquakes (incremental) and GitHub repos.
+- Docs: protocol, manifest, security, the patterns, and ARCHITECTURE.md.
+- A manifest snapshot test, plus opt-in live tests (`pytest -m live`).
 - Core framework `databolt.patterns`:
   - `Pattern` and `@pattern`, `RunContext`, a registry fed by the `databolt.patterns` entry
     points, manifest v1 (JSON Schema 2020-12 plus `x-databolt-ui`, secret-ref params) and

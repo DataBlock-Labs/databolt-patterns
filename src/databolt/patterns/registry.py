@@ -20,8 +20,12 @@ from databolt.patterns.errors import PatternNotFound, ValidationError
 ENTRY_POINT_GROUP = "databolt.patterns"
 DIST_NAME = "databolt-standard-patterns"
 
-# "module:attr" of each standard pattern; filled in as the standard library grows.
-BUILTINS: tuple[str, ...] = ()
+# "module:attr" of each standard pattern. Also registered as entry points; this list keeps
+# them available when the dist metadata is missing (vendored or zipapp installs).
+BUILTINS: tuple[str, ...] = (
+    "databolt.ingestion.api.rest:RestApiPattern",
+    "databolt.ingestion.api.http_get:HttpGetPattern",
+)
 
 
 def _load_ref(ref: str) -> Any:
