@@ -13,7 +13,9 @@ Of particular interest:
 - bypasses of the egress guard (reaching loopback, private, link-local, CGNAT or cloud-metadata
   addresses with `allow_private` off), including via redirects or DNS rebinding;
 - secret leakage into errors, logs, run results, state files or manifests;
-- auth headers or credentials sent to an origin other than the configured API;
+- credentials sent anywhere their binding does not allow: another origin than `base_url`
+  (and `auth_hosts`), a host outside the protocol's `secret_hosts`, or plain http after
+  https (see docs/security.md, "Credential binding");
 - the runner protocol writing anything other than one JSON result to stdout.
 
 Custom Python patterns run with the privileges of the calling process. They are **not**

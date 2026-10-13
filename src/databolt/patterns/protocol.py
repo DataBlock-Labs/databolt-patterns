@@ -69,6 +69,9 @@ class Request(BaseModel):
     pattern: PatternRef | None = None
     params: dict[str, Any] = Field(default_factory=dict)
     secrets: dict[str, str] = Field(default_factory=dict)
+    # {secret name: [host patterns]}: each secret is sent only to matching hosts. Exact
+    # host, or "*.example.com" for subdomains (not the apex). Empty list: sent nowhere.
+    secret_hosts: dict[str, list[str]] | None = None
     state: dict[str, Any] | None = None
     limits: dict[str, Any] = Field(default_factory=dict)
     egress: dict[str, Any] = Field(default_factory=dict)
@@ -223,6 +226,12 @@ def _dispatch(
 
     if req.op == "validate":
         parsed = p.parse_params(req.params)
+        from databolt.patterns.contract import RunContext
+
+        p.check_bindings(
+            parsed,
+            RunContext(params=parsed, secrets=req.secrets, secret_hosts=req.secret_hosts),
+        )
         needed = sorted(p.required_secrets(parsed))
         missing = [n for n in needed if n not in req.secrets]
         return {
@@ -252,6 +261,7 @@ def _dispatch(
         preview=req.op == "preview",
         log_stream=log_stream,
         redactor=redactor,
+        secret_hosts=req.secret_hosts,
     )
     return result.to_dict()
 

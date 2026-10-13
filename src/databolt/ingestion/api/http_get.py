@@ -12,6 +12,7 @@ import json
 from collections.abc import Iterator, Mapping
 from typing import Any, Literal
 
+import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from databolt.ingestion.api import auth as auth_mod
@@ -107,10 +108,18 @@ class HttpGetPattern(Pattern):
         assert isinstance(params, HttpGetConfig)
         return "" if "${" in params.url else redact_url(params.url)
 
+    def check_bindings(self, params: BaseModel, ctx: RunContext) -> None:
+        from databolt.ingestion.api.rest import check_secret_hosts
+
+        assert isinstance(params, HttpGetConfig)
+        host = httpx.URL(str(ctx.render(params.url))).host
+        check_secret_hosts(self.required_secrets(params), host, ctx, "url")
+
     def iter_records(self, params: BaseModel, ctx: RunContext) -> Iterator[Record]:
         assert isinstance(params, HttpGetConfig)
         ctx.cap_records(params.max_records)
         url = str(ctx.render(params.url))
+        ctx.credential_policy.bind_origin(url)
         ctx.stats.source_label = redact_url(url)
         headers = {k: str(v) for k, v in ctx.render(params.headers).items()}
         query = dict(ctx.render(params.params))

@@ -6,6 +6,29 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- **Credential binding.** Credentials could previously reach another origin through a
+  paginator's next link or an absolute `resource.path`. A single chokepoint in the HTTP
+  client now checks every request and every redirect hop:
+  - credentials (secrets and values derived from them) go only to `base_url`'s origin or
+    `client.auth_hosts`, and never over http after https;
+  - the runner protocol's `secret_hosts` binds each secret to hosts. A mismatch fails before
+    any request, with exit 2 and `secret_host_mismatch`.
+- **Cross-origin pagination.** Next links and absolute paths that leave `base_url`'s origin
+  now fail with `cross_origin_pagination`. The opt-in `allow_cross_origin_pagination` follows
+  them without credentials.
+- **OAuth `token_url`.** It must be same-origin or listed in `auth_hosts`, and https when
+  `base_url` is.
+- **CLI.** New `--secret-host NAME=HOST` flag.
+
+### Changed
+
+- **Incremental boundary.** The start is now inclusive (`range_start: closed` is the
+  default). The new `primary_key` setting records `boundary_keys` in state so the boundary
+  record is not re-landed, and a later record that shares the cursor's exact timestamp is no
+  longer skipped. The USGS example uses `primary_key: id`.
+
 ## [0.1.0] - 2026-10-13
 
 First release.

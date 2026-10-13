@@ -52,6 +52,19 @@ class ClientConfig(BaseModel):
     auth: AuthConfig = Field(default_factory=NoAuth, json_schema_extra=ui(order=2))
     paginator: PaginatorConfig = Field(default_factory=AutoPaginator, json_schema_extra=ui(order=3))
 
+    auth_hosts: list[str] = Field(
+        default_factory=list,
+        description="Extra hosts that may receive credentials, besides base_url's origin "
+        "(e.g. an OAuth token endpoint). Exact host, or *.example.com for subdomains.",
+        json_schema_extra=ui(advanced=True),
+    )
+    allow_cross_origin_pagination: bool = Field(
+        False,
+        description="Follow next-page links to another origin (never with credentials). "
+        "Off: such a link fails the run with cross_origin_pagination.",
+        json_schema_extra=ui(advanced=True),
+    )
+
     _coerce_auth = field_validator("auth", mode="before")(coerce_auth)
     _coerce_paginator = field_validator("paginator", mode="before")(coerce_paginator)
 
@@ -91,7 +104,7 @@ class ResourceConfig(BaseModel):
     _coerce_paginator = field_validator("paginator", mode="before")(coerce_paginator)
 
 
-_CLIENT_KEYS = {"base_url", "headers", "auth"}
+_CLIENT_KEYS = {"base_url", "headers", "auth", "auth_hosts", "allow_cross_origin_pagination"}
 _RESOURCE_KEYS = {
     "path",
     "method",

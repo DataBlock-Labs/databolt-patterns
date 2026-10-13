@@ -41,7 +41,9 @@ A flat form is accepted too, with `base_url`, `path`, `params`, `data_selector`,
 | `http_basic` | `username`, `password` (secret-ref) | `Authorization: Basic …` |
 | `oauth2_client_credentials` | `token_url`, `client_id`, `client_secret` (secret-ref), `scope`, `audience`, `client_auth: basic\|body`, `extra` | fetches a token once per run, then sends `Bearer` |
 
-A secret-ref field holds `${secrets.<name>}`. The default names are `token`, `api_key`, `password` and `client_secret`, but any name works, as long as the caller supplies it in `secrets`. Credentials go only to the origin of `base_url`.
+A secret-ref field holds `${secrets.<name>}`. The default names are `token`, `api_key`, `password` and `client_secret`, but any name works, as long as the caller supplies it in `secrets`.
+
+**Where credentials go.** Credentials are sent only to `base_url`'s origin, plus the hosts in `client.auth_hosts`, and never over plain http when `base_url` is https. For OAuth, add the token endpoint's host to `auth_hosts` unless it shares `base_url`'s origin. Next-page links or an absolute `resource.path` on another origin fail with `cross_origin_pagination`. Set `client.allow_cross_origin_pagination: true` to follow them, in which case they are sent without credentials. The runner protocol's `secret_hosts` narrows this further for each secret. See [security.md](../security.md#credential-binding).
 
 ## Pagination
 
@@ -93,12 +95,18 @@ resource:
     transform: epoch_ms_to_iso    # none | iso8601 | epoch_ms_to_iso | epoch_s_to_iso
     order: asc                    # asc | desc | unordered (default)
     lookback: 0                   # seconds (or units) to re-read before the cursor
-    range_start: open             # open (default) | closed
+    primary_key: id               # dedupes the boundary (recommended)
+    range_start: closed           # closed (default, inclusive) | open
 ```
 
 1. **Start value.** It is the committed `state.cursor` minus `lookback`, or `initial_value` on a first run. It is sent as `param`, and is also available as `${state.cursor}` in `params` and `json`.
-2. **Filtering.** Records whose cursor is below the start value are dropped, which covers APIs that ignore the filter. On a resumed run, `range_start: open` also drops records *equal* to the committed cursor. That way an inclusive API filter, such as USGS `starttime`, does not land the boundary record twice.
-3. **Proposal.** The state proposal is `{"cursor": <max landed value>, "cursor_path": …}`. It never moves backwards. The `transform` decides how the value is read and written: `epoch_ms_to_iso` reads milliseconds and writes `2026-10-12T08:30:00.123Z`.
+2. **Filtering.**
+   - Records whose cursor is below the start value are dropped, which covers APIs that ignore the filter.
+   - The start is **inclusive**, so a record equal to the committed cursor is not assumed to be old. A later event can share the last event's exact timestamp.
+   - With `primary_key`, the state keeps the keys of the records that sat exactly on the cursor (`boundary_keys`, at most 1000). A resumed run skips only those, so the boundary record never lands twice and a new same-timestamp record is not lost.
+   - Without `primary_key`, the boundary record lands again. That is safe, but it creates a duplicate, so merge or dedupe downstream.
+   - `range_start: open` drops everything equal to the cursor. Use it only for strictly increasing cursors, such as sequence ids.
+3. **Proposal.** The state proposal is `{"cursor": <max landed value>, "cursor_path": …, "boundary_keys": […]}`. It never moves backwards. The `transform` decides how the value is read and written: `epoch_ms_to_iso` reads milliseconds and writes `2026-10-12T08:30:00.123Z`.
 4. **Truncation rule.** A **truncated** run, stopped by a page, record, time or byte cap, advances the cursor only when `order: asc`. For any other order, the pages not yet fetched may hold older records, and advancing would skip them for good. The run keeps the old state and adds a warning instead.
 5. **Commit after landing.** The caller commits the proposal only after the records have landed.
 6. **Changed `cursor_path`.** If `cursor_path` changes, the stored cursor is ignored and the run starts from `initial_value`, with a warning.

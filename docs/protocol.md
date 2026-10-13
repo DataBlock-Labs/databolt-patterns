@@ -37,6 +37,7 @@ python -I -m databolt.patterns protocol < request.json > result.json
 | `pattern` | Exactly one of three forms (see below). |
 | `params` | Validated against the pattern's `params_schema`. |
 | `secrets` | `{name: value}`. Params reference these as `${secrets.name}`. Values are never echoed. |
+| `secret_hosts` | `{name: [host, "*.domain"]}`. Each secret, and anything derived from it, is sent only to matching hosts. An exact entry matches that host; `*.` matches subdomains at any depth but not the apex. A missing or empty list means the secret is sent nowhere. If the field is omitted, the pattern's origin binding still applies. See [security.md](security.md#credential-binding). |
 | `state` | The last *committed* state, or `null`. |
 | `limits` | Optional caps (see the table below). |
 | `egress` | Optional guard settings (see the table below). |
@@ -110,6 +111,9 @@ All fields are optional.
 
 ## Result: failure
 
+Every failure still writes exactly one JSON result to stdout, whatever the exit code (2, 3 or
+4). Callers should parse stdout first, then fall back to the exit code.
+
 ```json
 {"ok": false, "protocol": 1,
  "error": {"code": "http_error", "message": "GET https://api.example.com/v1/items returned HTTP 401: …",
@@ -125,6 +129,9 @@ Messages are redacted. Every secret value from the request, the derived Basic-au
 | `validation_error`, `template_error` | 2 | The params are invalid, or a `${...}` reference is missing. |
 | `pattern_not_found`, `pattern_version_mismatch` | 2 | The pattern cannot be resolved. |
 | `trust_mismatch` | 2 | A custom Python file's sha256 differs from the trusted hash. |
+| `secret_host_mismatch` | 2 | A secret must go to a host outside its `secret_hosts` (`base_url`, or an OAuth `token_url`). Detected before any request. At run time, a credential in a URL path or body bound elsewhere also fails with this code, as exit 3. |
+| `token_url_not_allowed` | 2 | The OAuth `token_url` is neither on `base_url`'s origin nor in `client.auth_hosts`, or it is http while `base_url` is https. |
+| `cross_origin_pagination` | 3 | A next-page link or an absolute path leaves `base_url`'s origin and `allow_cross_origin_pagination` is off. |
 | `protocol_mismatch` | 4 | `protocol` is not 1. |
 | `http_error` | 3 | A non-2xx status after retries. `retryable` is true for 429 and 5xx. |
 | `transport_error` | 3 | A connection, TLS or timeout failure after retries. |

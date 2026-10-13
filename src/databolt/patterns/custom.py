@@ -171,6 +171,9 @@ class YamlPattern(Pattern):
         declared = {s.name for s in self.secrets if s.required}
         return declared | self.base.required_secrets(self.bind_config(params))
 
+    def check_bindings(self, params: BaseModel, ctx: RunContext) -> None:
+        self.base.check_bindings(self.bind_config(params), ctx)
+
     def source_label(self, params: BaseModel) -> str:
         try:
             return self.base.source_label(self.bind_config(params))

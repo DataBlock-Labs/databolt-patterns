@@ -13,6 +13,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from databolt.patterns import templating
 from databolt.patterns.contract import RunContext, SecretRef, ui
 from databolt.patterns.errors import HttpError, ValidationError
 
@@ -127,6 +128,17 @@ def oauth2_client_credentials(
     )
 
 
+def secret_name(ref: str) -> str:
+    """`${secrets.token}` -> "token"."""
+    names = templating.references(ref, "secrets")
+    return next(iter(names)) if names else ""
+
+
+def secret_names(cfg: BaseModel) -> set[str]:
+    """Every secret an auth config references."""
+    return templating.references(cfg.model_dump(), "secrets")
+
+
 # -- runtime -------------------------------------------------------------------------------
 
 
@@ -144,8 +156,14 @@ class Authenticator:
         value = self.ctx.render(ref)
         if not isinstance(value, str) or not value:
             raise ValidationError("an auth secret resolved to an empty value")
-        self.ctx.redactor.add(value)
+        self.ctx.add_credential(secret_name(ref), value)
         return value
+
+    def allowed_at(self, url: str) -> bool:
+        """Whether every secret this auth uses may be sent to `url` (the client also
+        enforces this, per hop; checking here avoids building headers it would strip)."""
+        policy = self.ctx.credential_policy
+        return all(policy.denial(n, url) is None for n in secret_names(self.cfg))
 
     def apply(self, headers: dict[str, str], params: dict[str, Any]) -> None:
         cfg = self.cfg
@@ -162,9 +180,9 @@ class Authenticator:
             user = str(self.ctx.render(cfg.username))
             pwd = self._secret(cfg.password)
             self.ctx.redactor.add_basic(user, pwd)
-            headers["authorization"] = (
-                "Basic " + base64.b64encode(f"{user}:{pwd}".encode()).decode()
-            )
+            pair = base64.b64encode(f"{user}:{pwd}".encode()).decode()
+            self.ctx.add_credential(secret_name(cfg.password), pair)
+            headers["authorization"] = f"Basic {pair}"
         elif isinstance(cfg, OAuth2ClientCredentials):
             headers["authorization"] = f"Bearer {self._oauth_token(cfg)}"
 
@@ -183,6 +201,7 @@ class Authenticator:
         if cfg.client_auth == "basic":
             self.ctx.redactor.add_basic(client_id, secret)
             pair = base64.b64encode(f"{client_id}:{secret}".encode()).decode()
+            self.ctx.add_credential(secret_name(cfg.client_secret), pair)
             headers["authorization"] = f"Basic {pair}"
         else:
             form.update({"client_id": client_id, "client_secret": secret})
@@ -191,7 +210,8 @@ class Authenticator:
         token = body.get("access_token") if isinstance(body, dict) else None
         if not isinstance(token, str) or not token:
             raise HttpError("token endpoint returned no access_token", http_status=resp.status_code)
-        self.ctx.redactor.add(token)
+        # The access token is bound like the client secret it was obtained with.
+        self.ctx.add_credential(secret_name(cfg.client_secret), token)
         expires_in = body.get("expires_in") if isinstance(body, dict) else None
         ttl = float(expires_in) if isinstance(expires_in, (int, float)) else 3600.0
         self._token = token

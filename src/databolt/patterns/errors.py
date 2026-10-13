@@ -69,6 +69,24 @@ class EgressBlocked(PatternError):
     code = "egress_blocked"
 
 
+class CredentialBlocked(EgressBlocked):
+    """A request would have carried a secret somewhere its binding does not allow."""
+
+    code = "secret_host_mismatch"
+
+
+class SecretHostMismatch(ValidationError):
+    """Found before any request: a secret's host binding excludes where it must go."""
+
+    code = "secret_host_mismatch"
+
+
+class CrossOriginPagination(PatternError):
+    """A next-page link (or absolute path) points at a different origin than base_url."""
+
+    code = "cross_origin_pagination"
+
+
 class HttpError(PatternError):
     """A non-success HTTP response after retries."""
 

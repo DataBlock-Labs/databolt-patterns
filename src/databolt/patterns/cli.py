@@ -115,6 +115,18 @@ def _secrets(args: argparse.Namespace) -> dict[str, str]:
     return out
 
 
+def _secret_hosts(args: argparse.Namespace) -> dict[str, list[str]] | None:
+    if not args.secret_host:
+        return None
+    out: dict[str, list[str]] = {}
+    for kv in args.secret_host:
+        k, sep, v = kv.partition("=")
+        if not sep or not v:
+            raise ValidationError("--secret-host expects NAME=HOST")
+        out.setdefault(k.strip(), []).append(v.strip())
+    return out
+
+
 # -- commands ------------------------------------------------------------------------------
 
 
@@ -256,6 +268,7 @@ def _run_cli(
         sink=sink,
         preview=args.preview,
         redactor=redactor,
+        secret_hosts=_secret_hosts(args),
     )
 
 
@@ -325,6 +338,13 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         metavar="NAME=VALUE",
         help="a secret: NAME=@env:VAR (preferred), NAME=@file:PATH or NAME=VALUE",
+    )
+    p.add_argument(
+        "--secret-host",
+        action="append",
+        metavar="NAME=HOST",
+        help="bind a secret to a host (repeatable; *.example.com for subdomains). Once any "
+        "is given, every secret is sent only to its listed hosts",
     )
     p.add_argument("--state", help="state file: read before the run, committed after success")
     p.add_argument("--no-commit", action="store_true", help="never write the state file")
