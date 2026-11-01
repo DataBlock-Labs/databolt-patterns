@@ -88,8 +88,11 @@ class RunContext:
         log_stream: TextIO | None = None,
         guard: EgressGuard | None = None,
         secret_hosts: Mapping[str, list[str]] | None = None,
+        inputs: Mapping[str, str] | None = None,
     ) -> None:
         self.params = params
+        # Input datasets as ndjson files, by dataset id (runner protocol `inputs`).
+        self.inputs: Mapping[str, str] = dict(inputs or {})
         self.secrets: Mapping[str, str] = dict(secrets or {})
         self.state = state
         self.limits = limits or Limits()
@@ -155,6 +158,18 @@ class RunContext:
         state = dict(self.state or {})
         state.update(extra_state or {})
         return templating.render(obj, {"params": params, "secrets": self.secrets, "state": state})
+
+    def rows(self, dataset: str) -> Iterator[dict[str, Any]]:
+        """The rows of one input dataset (a feedback mart, or a recipe input)."""
+        import json
+
+        path = self.inputs.get(dataset)
+        if path is None:
+            raise ValidationError(f"{dataset} is not an input of this run", code="invalid_request")
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    yield json.loads(line)
 
     def track_state(self, tracker: StateTracker) -> None:
         """Hand the runtime an incremental tracker; it observes each *landed* record."""

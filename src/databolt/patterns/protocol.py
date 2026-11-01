@@ -73,6 +73,8 @@ class Request(BaseModel):
     # host, or "*.example.com" for subdomains (not the apex). Empty list: sent nowhere.
     secret_hosts: dict[str, list[str]] | None = None
     state: dict[str, Any] | None = None
+    # {dataset id: ndjson path}: rows the run may read through `ctx.rows(id)`.
+    inputs: dict[str, str] = Field(default_factory=dict)
     limits: dict[str, Any] = Field(default_factory=dict)
     egress: dict[str, Any] = Field(default_factory=dict)
     output: OutputSpec | None = None
@@ -262,6 +264,7 @@ def _dispatch(
         log_stream=log_stream,
         redactor=redactor,
         secret_hosts=req.secret_hosts,
+        inputs=req.inputs,
     )
     return result.to_dict()
 

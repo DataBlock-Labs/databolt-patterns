@@ -314,3 +314,47 @@ def test_limit_aliases_and_unknown_keys(reg: Registry) -> None:
     assert rc == 0
     assert "ignored unknown limits field(s): warp" in result["warnings"]
     assert "ignored unknown egress field(s): x" in result["warnings"]
+
+
+def test_run_reads_inputs(tmp_path: Path) -> None:
+    from collections.abc import Iterator
+
+    from pydantic import BaseModel
+
+    from databolt.patterns.contract import RunContext, pattern
+
+    class P(BaseModel):
+        pass
+
+    @pattern(id="test.doubles", version="1.0.0")
+    def doubles(params: P, ctx: RunContext) -> Iterator[dict[str, Any]]:
+        for row in ctx.rows("orders"):
+            yield {"id": row["id"], "twice": row["n"] * 2}
+
+    r = Registry()
+    r.register(doubles)
+    rows = tmp_path / "orders.ndjson"
+    rows.write_text('{"id": 1, "n": 2}\n{"id": 2, "n": 5}\n')
+    out = tmp_path / "out"
+    result, code = handle(
+        req(
+            op="run",
+            pattern={"id": "test.doubles", "version": "^1"},
+            inputs={"orders": str(rows)},
+            output={"dir": str(out), "format": "ndjson"},
+        ),
+        registry=r,
+    )
+    assert code == 0, result
+    lines = Path(result["files"][0]["path"]).read_text().splitlines()
+    assert [json.loads(x)["twice"] for x in lines] == [4, 10]
+    # A dataset that is not an input is refused.
+    result, code = handle(
+        req(
+            op="run",
+            pattern={"id": "test.doubles", "version": "^1"},
+            output={"dir": str(out), "format": "ndjson"},
+        ),
+        registry=r,
+    )
+    assert code != 0 and "not an input" in result["error"]["message"]

@@ -83,6 +83,7 @@ def run(
     redactor: Redactor | None = None,
     guard: EgressGuard | None = None,
     secret_hosts: Mapping[str, list[str]] | None = None,
+    inputs: Mapping[str, str] | None = None,
 ) -> RunResult:
     """Run `pattern` once. Raises PatternError on failure (partial output is removed).
 
@@ -121,6 +122,7 @@ def run(
         log_stream=log_stream,
         guard=guard or EgressGuard(egress),
         secret_hosts=secret_hosts,
+        inputs=inputs,
     )
     p.check_bindings(parsed, ctx)  # before any request: secret_host_mismatch is exit 2
     out = MemorySink() if preview or sink is None else sink
