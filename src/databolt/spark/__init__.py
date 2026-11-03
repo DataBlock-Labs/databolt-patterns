@@ -31,6 +31,7 @@ import decimal
 import hashlib
 import importlib.util
 import json
+import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -45,14 +46,37 @@ class SparkMissing(RuntimeError):
     """The Spark client for this session kind is not installed."""
 
 
+# `token=…` (or any `;key=value` parameter) that an error message could echo.
+_URL_PARAM = re.compile(r"(;\s*[A-Za-z_]+\s*=)[^;\s'\"]*")
+
+
+def plain_remote(remote: str) -> str:
+    """`sc://host[:port]`, refusing parameters: the token comes only in `token`."""
+    if not remote.startswith("sc://"):
+        raise ValueError("a Spark Connect remote starts with sc://")
+    if ";" in remote or "@" in remote:
+        raise ValueError(
+            "a Spark Connect remote is sc://host:port only; put the token in the token field"
+        )
+    return remote
+
+
+def connect_url(remote: str, token: str | None) -> str:
+    """The Spark Connect URL: Spark takes the token as a URL parameter (it turns on TLS)."""
+    return f"{remote.rstrip('/')}/;token={token}" if token else remote
+
+
+def mask_url_params(text: str) -> str:
+    """Masks every `;key=value` parameter of a Spark Connect URL in `text`."""
+    return _URL_PARAM.sub(r"\1***", text)
+
+
 def open_session(spec: dict[str, Any]) -> Any:
     """A Spark session for a `connect` or `databricks` spec."""
     kind = spec.get("kind")
     token = spec.get("token") or None
     if kind == "connect":
-        remote = str(spec.get("remote", ""))
-        if not remote.startswith("sc://"):
-            raise ValueError("a Spark Connect remote starts with sc://")
+        remote = plain_remote(str(spec.get("remote", "")))
         try:
             from pyspark.sql import SparkSession
         except ImportError as e:
@@ -61,7 +85,7 @@ def open_session(spec: dict[str, Any]) -> Any:
                 "(databolt-standard-patterns[spark])"
             ) from e
         # Spark Connect takes the token as a URL parameter; it turns on TLS.
-        url = f"{remote.rstrip('/')}/;token={token}" if token else remote
+        url = connect_url(remote, token)
         return SparkSession.builder.remote(url).getOrCreate()
     if kind == "databricks":
         try:
@@ -121,7 +145,10 @@ class Worker:
         op = req.get("op")
         if op == "open":
             spec = dict(req.get("session") or {})
-            self.redact.add(spec.get("token"))
+            token = spec.get("token") or None
+            self.redact.add(token)
+            if spec.get("kind") == "connect" and token:
+                self.redact.add(connect_url(str(spec.get("remote", "")), token))
             self.kind = str(spec.get("kind", ""))
             self.spark = self.opener(spec)
             return {"ok": True, "version": str(getattr(self.spark, "version", ""))}
@@ -178,7 +205,10 @@ class Worker:
             try:
                 out = self.handle(json.loads(line))
             except Exception as e:  # every failure is an answer, never a crash
-                out = {"ok": False, "error": self.redact(f"{type(e).__name__}: {e}")}
+                out = {
+                    "ok": False,
+                    "error": mask_url_params(self.redact(f"{type(e).__name__}: {e}")),
+                }
             stdout.write(json.dumps(out, default=str) + "\n")
             stdout.flush()
             if out.get("ok") and json.loads(line).get("op") == "close":

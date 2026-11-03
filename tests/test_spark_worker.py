@@ -160,3 +160,22 @@ def test_open_session_refuses_a_bad_remote_and_names_the_extra() -> None:
     except ImportError:
         with pytest.raises(SparkMissing, match="`spark` extra"):
             open_session({"kind": "connect", "remote": "sc://localhost:15002"})
+
+
+def test_a_remote_with_parameters_is_refused() -> None:
+    for bad in ["sc://h:1/;token=abc", "sc://h:1/;user_id=x", "sc://u@h:1"]:
+        with pytest.raises(ValueError, match="sc://host:port only"):
+            open_session({"kind": "connect", "remote": bad})
+
+
+def test_an_error_that_echoes_the_url_never_shows_the_token() -> None:
+    def opener(spec: dict[str, Any]) -> FakeSpark:
+        url = f"{spec['remote']}/;token={spec['token']}"
+        raise RuntimeError(f"cannot reach {url}; also sc://x:1/;token=other-secret-value")
+
+    out = io.StringIO()
+    req = {"op": "open", "session": {"kind": "connect", "remote": "sc://h:1", "token": TOKEN}}
+    Worker(opener).serve(io.StringIO(json.dumps(req) + "\n"), out)
+    err = json.loads(out.getvalue())["error"]
+    assert TOKEN not in err and "other-secret-value" not in err
+    assert ";token=***" in err
