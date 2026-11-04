@@ -176,3 +176,57 @@ def test_a_table_bundle_carries_the_table_mime() -> None:
     assert b is not None and b[TABLE_MIME]["rows"] == [[1]] and b[TABLE_MIME]["chart"]["x"] == "a"
     assert table_bundle([{"a": 1}])[TABLE_MIME]["columns"] == ["a"]  # type: ignore[index]
     assert table_bundle(42) is None
+
+
+def relayed(kind: str, content: dict[str, Any]) -> list[dict[str, Any]]:
+    out = io.StringIO()
+    Bridge(FakeKernel(), out, queue.Queue(), True).relay(kind, content)
+    return [json.loads(line) for line in out.getvalue().splitlines()]
+
+
+def test_active_content_comes_out_as_text_plain_only() -> None:
+    for mime in ("text/html", "application/javascript", "image/svg+xml"):
+        msgs = relayed(
+            "display_data",
+            {
+                "data": {mime: "<script>x()</script>", "text/plain": "fallback"},
+                "metadata": {mime: {"isolated": False}},
+                "transient": {"display_id": "d1"},
+            },
+        )
+        assert msgs[0]["content"] == {"data": {"text/plain": "fallback"}, "metadata": {}}
+        assert msgs[1]["content"]["text"] == f"dropped {mime}: not allowed in notebook output\n"
+    # No fallback: only the note.
+    msgs = relayed("display_data", {"data": {"text/html": "<b>x</b>"}})
+    assert [m["type"] for m in msgs] == ["stream"]
+
+
+def test_a_table_bundle_passes_and_images_keep_only_their_size() -> None:
+    table = {"columns": ["x"], "rows": [[1]]}
+    msgs = relayed(
+        "execute_result",
+        {
+            "data": {TABLE_MIME: table, "image/png": "iVBO"},
+            "metadata": {"image/png": {"width": 10, "height": 5, "onload": "x"}},
+            "execution_count": 3,
+        },
+    )
+    assert msgs == [
+        {
+            "op": "output",
+            "type": "execute_result",
+            "content": {
+                "data": {TABLE_MIME: table, "image/png": "iVBO"},
+                "metadata": {"image/png": {"width": 10, "height": 5}},
+                "execution_count": 3,
+            },
+        }
+    ]
+
+
+def test_a_traceback_is_plain_text() -> None:
+    msgs = relayed(
+        "error",
+        {"ename": "E", "evalue": "v", "traceback": ["\x1b[0;31mE\x1b[0m: v"], "extra": 1},
+    )
+    assert msgs[0]["content"] == {"ename": "E", "evalue": "v", "traceback": ["E: v"]}

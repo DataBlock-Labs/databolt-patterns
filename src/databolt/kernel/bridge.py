@@ -12,7 +12,8 @@ Studio talks to this bridge in JSON lines, one object per line, at most 8 MiB:
                        {"op": "interrupted", "ok": bool, "error": "..."}
                        {"op": "done", "status": "ok" | "error" | "aborted"}
 
-`content` is the Jupyter message content, unchanged: MIME bundles pass through.
+`content` is the Jupyter message content, cleaned by `clean_output`: a bundle keeps
+only passive MIME types (`ALLOWED`), and an error traceback is plain text.
 The kernel runs on loopback inside the container; Studio sees only stdio.
 """
 
@@ -21,11 +22,13 @@ from __future__ import annotations
 import argparse
 import json
 import queue
+import re
+import subprocess
 import sys
 import threading
 from typing import Any, Protocol, TextIO
 
-from databolt.kernel import PARAMS_PROMPT, SQL_PROMPT
+from databolt.kernel import PARAMS_PROMPT, SQL_PROMPT, TABLE_MIME
 
 MAX_LINE = 8 * 1024 * 1024
 # Jupyter messages the bridge passes to Studio.
@@ -34,6 +37,57 @@ RELAY = {"stream", "display_data", "execute_result", "error"}
 NO_INTERRUPT = {"rust"}
 
 Inbox = queue.Queue[dict[str, Any]]
+
+# MIME types a notebook output may carry: none of them is active content.
+ALLOWED = {
+    "text/plain",
+    "text/markdown",
+    "image/png",
+    "image/jpeg",
+    "application/json",
+    TABLE_MIME,
+}
+ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-_]")
+
+
+def strip_ansi(text: str) -> str:
+    return ANSI.sub("", text)
+
+
+def clean_output(kind: str, content: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
+    """The content Studio may show, and a note per dropped MIME type.
+
+    Returns None for content when nothing is left to show.
+    """
+    if kind == "stream":
+        name = "stderr" if content.get("name") == "stderr" else "stdout"
+        return {"name": name, "text": str(content.get("text", ""))}, []
+    if kind == "error":
+        tb = content.get("traceback")
+        lines = [strip_ansi(str(t)) for t in tb] if isinstance(tb, list) else []
+        return {
+            "ename": strip_ansi(str(content.get("ename", ""))),
+            "evalue": strip_ansi(str(content.get("evalue", ""))),
+            "traceback": lines,
+        }, []
+    raw = content.get("data")
+    data = raw if isinstance(raw, dict) else {}
+    keep = {k: v for k, v in data.items() if k in ALLOWED}
+    notes = [f"dropped {k}: not allowed in notebook output" for k in data if k not in ALLOWED]
+    meta = content.get("metadata")
+    size: dict[str, Any] = {}
+    for k in keep:
+        m = meta.get(k) if isinstance(meta, dict) else None
+        if k.startswith("image/") and isinstance(m, dict):
+            dims = {d: m[d] for d in ("width", "height") if isinstance(m.get(d), int)}
+            if dims:
+                size[k] = dims
+    if not keep:
+        return None, notes
+    out: dict[str, Any] = {"data": keep, "metadata": size}
+    if kind == "execute_result":
+        out["execution_count"] = content.get("execution_count")
+    return out, notes
 
 
 class Client(Protocol):
@@ -71,6 +125,19 @@ class Bridge:
             )
         self.out.write(line + "\n")
         self.out.flush()
+
+    def relay(self, kind: str, content: Any) -> None:
+        clean, notes = clean_output(kind, content if isinstance(content, dict) else {})
+        if clean is not None:
+            self.send({"op": "output", "type": kind, "content": clean})
+        for note in notes:
+            self.send(
+                {
+                    "op": "output",
+                    "type": "stream",
+                    "content": {"name": "stderr", "text": note + "\n"},
+                }
+            )
 
     def interrupt(self) -> None:
         if not self.can_interrupt:
@@ -156,7 +223,7 @@ class Bridge:
             if mine(m):
                 kind = m["msg_type"]  # type: ignore[index]
                 if kind in RELAY:
-                    self.send({"op": "output", "type": kind, "content": m["content"]})  # type: ignore[index]
+                    self.relay(kind, m["content"])  # type: ignore[index]
                 elif kind == "status" and m["content"].get("execution_state") == "idle":  # type: ignore[index]
                     idle = True
             m = self.client.shell(0)
@@ -203,7 +270,10 @@ class JupyterClient:
         from jupyter_client import KernelManager
 
         self.km = KernelManager(kernel_name=kernel)
-        self.km.start_kernel()
+        # The kernel must not inherit the bridge's stdio: user code could write
+        # protocol lines to Studio. Studio still treats every line as untrusted.
+        null = subprocess.DEVNULL
+        self.km.start_kernel(stdin=null, stdout=null, stderr=null)
         self.kc = self.km.blocking_client()
         self.kc.start_channels()
         self.kc.wait_for_ready(timeout=120)
