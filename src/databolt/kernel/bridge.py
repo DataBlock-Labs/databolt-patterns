@@ -39,9 +39,9 @@ NO_INTERRUPT = {"rust"}
 Inbox = queue.Queue[dict[str, Any]]
 
 # MIME types a notebook output may carry: none of them is active content.
+# text/markdown is not one: it can hold raw HTML and javascript: links.
 ALLOWED = {
     "text/plain",
-    "text/markdown",
     "image/png",
     "image/jpeg",
     "application/json",

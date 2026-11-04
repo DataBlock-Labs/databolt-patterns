@@ -185,7 +185,7 @@ def relayed(kind: str, content: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def test_active_content_comes_out_as_text_plain_only() -> None:
-    for mime in ("text/html", "application/javascript", "image/svg+xml"):
+    for mime in ("text/html", "application/javascript", "image/svg+xml", "text/markdown"):
         msgs = relayed(
             "display_data",
             {
@@ -230,3 +230,10 @@ def test_a_traceback_is_plain_text() -> None:
         {"ename": "E", "evalue": "v", "traceback": ["\x1b[0;31mE\x1b[0m: v"], "extra": 1},
     )
     assert msgs[0]["content"] == {"ename": "E", "evalue": "v", "traceback": ["E: v"]}
+
+
+def test_a_markdown_bundle_with_a_script_is_text_plain_only() -> None:
+    md = "[x](javascript:alert(1)) <script>alert(1)</script>"
+    msgs = relayed("execute_result", {"data": {"text/markdown": md, "text/plain": "x"}})
+    assert msgs[0]["content"]["data"] == {"text/plain": "x"}
+    assert "dropped text/markdown" in msgs[1]["content"]["text"]
