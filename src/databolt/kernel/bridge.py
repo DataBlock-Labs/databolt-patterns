@@ -47,11 +47,24 @@ ALLOWED = {
     "application/json",
     TABLE_MIME,
 }
+# A drop note lists MIME types up to this many characters.
+NOTE_LIST = 200
 ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b[@-_]")
 
 
 def strip_ansi(text: str) -> str:
     return ANSI.sub("", text)
+
+
+def drop_note(dropped: list[str]) -> list[str]:
+    """One note for the dropped MIME types, its list cut at NOTE_LIST characters."""
+    if not dropped:
+        return []
+    listed = ", ".join(dropped)
+    if len(listed) > NOTE_LIST:
+        listed = listed[:NOTE_LIST] + "…"
+    types = "type" if len(dropped) == 1 else "types"
+    return [f"dropped {len(dropped)} {types}: {listed} (not allowed in notebook output)"]
 
 
 def clean_output(kind: str, content: dict[str, Any]) -> tuple[dict[str, Any] | None, list[str]]:
@@ -73,7 +86,7 @@ def clean_output(kind: str, content: dict[str, Any]) -> tuple[dict[str, Any] | N
     raw = content.get("data")
     data = raw if isinstance(raw, dict) else {}
     keep = {k: v for k, v in data.items() if k in ALLOWED}
-    notes = [f"dropped {k}: not allowed in notebook output" for k in data if k not in ALLOWED]
+    notes = drop_note([k for k in data if k not in ALLOWED])
     meta = content.get("metadata")
     size: dict[str, Any] = {}
     for k in keep:

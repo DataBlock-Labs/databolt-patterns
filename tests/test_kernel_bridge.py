@@ -195,7 +195,8 @@ def test_active_content_comes_out_as_text_plain_only() -> None:
             },
         )
         assert msgs[0]["content"] == {"data": {"text/plain": "fallback"}, "metadata": {}}
-        assert msgs[1]["content"]["text"] == f"dropped {mime}: not allowed in notebook output\n"
+        note = f"dropped 1 type: {mime} (not allowed in notebook output)\n"
+        assert msgs[1]["content"]["text"] == note
     # No fallback: only the note.
     msgs = relayed("display_data", {"data": {"text/html": "<b>x</b>"}})
     assert [m["type"] for m in msgs] == ["stream"]
@@ -236,4 +237,13 @@ def test_a_markdown_bundle_with_a_script_is_text_plain_only() -> None:
     md = "[x](javascript:alert(1)) <script>alert(1)</script>"
     msgs = relayed("execute_result", {"data": {"text/markdown": md, "text/plain": "x"}})
     assert msgs[0]["content"]["data"] == {"text/plain": "x"}
-    assert "dropped text/markdown" in msgs[1]["content"]["text"]
+    assert "dropped 1 type: text/markdown" in msgs[1]["content"]["text"]
+
+
+def test_a_thousand_dropped_types_make_one_bounded_note() -> None:
+    data = {f"application/x-evil-{i}": "x" for i in range(1000)}
+    msgs = relayed("display_data", {"data": data})
+    assert len(msgs) == 1
+    text = msgs[0]["content"]["text"]
+    assert text.startswith("dropped 1000 types: application/x-evil-0, ")
+    assert len(text) <= 200 + 60
