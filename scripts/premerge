@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Pre-merge gate: run the CI checks before a push or merge. See the premerge-gate skill.
+# One command per line: set -e does not stop on the left side of `&&`.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+# The commands of the lint and test jobs in .github/workflows/ci.yml.
+tier_fast() {
+	uv run --extra dev python scripts/check_action_pins.py
+	uv run --extra dev ruff check .
+	uv run --extra dev ruff format --check .
+	uv run --extra dev mypy
+	uv run --extra dev --with-editable . --with-editable examples/entrypoint_pkg pytest -q
+}
+
+# The build job of ci.yml.
+tier_full() {
+	tier_fast
+	uv build --quiet --out-dir "$(mktemp -d)"
+}
+
+tier_uat() {
+	: # A library: no app to start. The Python matrix (3.10 to 3.13, three systems) stays CI-only.
+}
+
+lib=${PREMERGE_LIB:-$HOME/projects/hermes-ops/bin/premerge-lib.sh}
+if [ -f "$lib" ]; then
+	# shellcheck source=/dev/null
+	. "$lib"
+	premerge_main "$@"
+else
+	echo "premerge: $lib missing; running tier without stamp" >&2
+	"tier_${1:-fast}"
+fi

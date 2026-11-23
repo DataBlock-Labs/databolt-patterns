@@ -43,3 +43,5 @@ Small, focused PRs. Describe the behaviour change and how you tested it. Add a l
 *Unreleased* in `CHANGELOG.md` for anything a user would notice.
 
 By contributing you agree that your contributions are licensed under Apache-2.0.
+
+Before push: `scripts/premerge fast`. Before merge: `full` and `uat`.
