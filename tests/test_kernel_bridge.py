@@ -9,9 +9,9 @@ import threading
 import time
 from typing import Any
 
-from databolt.kernel import PARAMS_PROMPT, SQL_PROMPT, TABLE_MIME, Table
+from databolt.kernel import PARAMS_PROMPT, SQL_PROMPT, TABLE_MIME, WRITE_PROMPT, Table
 from databolt.kernel.bridge import MAX_LINE, Bridge, read_lines
-from databolt.kernel.helper import table_bundle
+from databolt.kernel.helper import frame_rows, table_bundle
 
 
 class FakeKernel:
@@ -40,6 +40,14 @@ class FakeKernel:
         elif code.startswith("sql"):
             q = json.dumps({"sql": "SELECT 1 AS x", "params": {}})
             self.put("stdin", "input_request", {"prompt": SQL_PROMPT + q})
+            self.busy = "sql"
+        elif code == "write":
+            q = json.dumps({"table": "t", "columns": ["x"], "rows": [[1], [2]]})
+            self.put("stdin", "input_request", {"prompt": WRITE_PROMPT + q})
+            self.busy = "sql"
+        elif code == "write big":
+            q = json.dumps({"table": "t", "columns": ["x"], "rows": [["y" * MAX_LINE]]})
+            self.put("stdin", "input_request", {"prompt": WRITE_PROMPT + q})
             self.busy = "sql"
         elif code == "widgets":
             self.put("stdin", "input_request", {"prompt": PARAMS_PROMPT})
@@ -115,6 +123,26 @@ def test_sql_asks_studio_and_answers_the_kernel() -> None:
     assert out[0] == {"op": "sql", "sql": "SELECT 1 AS x", "params": {}}
     assert json.loads(k.answers[0]) == {"ok": True, "columns": ["x"], "rows": [[1]]}
     assert out[-1] == {"op": "done", "status": "ok"}
+
+
+def test_write_sample_asks_studio_and_answers_the_kernel() -> None:
+    reply = {"op": "write_sample_result", "ok": True, "rows": 2}
+    k, out = run("write", [reply])
+    assert out[0] == {"op": "write_sample", "table": "t", "columns": ["x"], "rows": [[1], [2]]}
+    assert json.loads(k.answers[0]) == {"ok": True, "rows": 2}
+    assert out[-1] == {"op": "done", "status": "ok"}
+
+
+def test_write_sample_over_the_line_limit_fails_in_the_bridge() -> None:
+    k, out = run("write big", [])
+    assert not json.loads(k.answers[0])["ok"]
+    assert all(m["op"] != "write_sample" for m in out)
+
+
+def test_frame_rows_reads_tables_and_dict_lists() -> None:
+    assert frame_rows(Table(["a"], [[1]])) == (["a"], [[1]])
+    assert frame_rows([{"a": 1, "b": 2}, {"a": 3}]) == (["a", "b"], [[1, 2], [3, None]])
+    assert frame_rows([]) == ([], [])
 
 
 def test_widgets_are_answered_from_the_cell_params() -> None:

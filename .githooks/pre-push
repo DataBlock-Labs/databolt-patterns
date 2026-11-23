@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Run the pre-merge gate before a push. Main gets full + uat; other branches get fast.
+# Install once per clone: git config core.hooksPath .githooks
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+tiers=fast
+while read -r _lref lsha rref _rsha; do
+	[ "$lsha" = 0000000000000000000000000000000000000000 ] && continue # branch delete
+	case $rref in refs/heads/main | refs/heads/master) tiers="full uat" ;; esac
+done
+# shortcut: checks HEAD, not the pushed ref; push the checked-out branch.
+for t in $tiers; do
+	scripts/premerge "$t"
+done

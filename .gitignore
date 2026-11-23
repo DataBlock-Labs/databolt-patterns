@@ -13,3 +13,4 @@ htmlcov/
 out/
 *.duckdb
 *.duckdb.wal
+uv.lock
