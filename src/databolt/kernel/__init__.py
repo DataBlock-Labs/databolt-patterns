@@ -18,6 +18,7 @@ from typing import Any
 # Prompts the helper sends with input(); the bridge answers them, never the user.
 SQL_PROMPT = "\x00databolt.sql:"
 PARAMS_PROMPT = "\x00databolt.params"
+WRITE_PROMPT = "\x00databolt.write_sample:"
 # The MIME type of a table output (Studio and the VS Code extension render it).
 TABLE_MIME = "application/vnd.databolt.table+json"
 MAX_ROWS = 10_000

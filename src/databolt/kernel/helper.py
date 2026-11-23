@@ -14,7 +14,14 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from databolt.kernel import MAX_ROWS, PARAMS_PROMPT, SQL_PROMPT, TABLE_MIME, Table
+from databolt.kernel import (
+    MAX_ROWS,
+    PARAMS_PROMPT,
+    SQL_PROMPT,
+    TABLE_MIME,
+    WRITE_PROMPT,
+    Table,
+)
 
 
 def sql(query: str, **params: Any) -> Table:
@@ -23,6 +30,33 @@ def sql(query: str, **params: Any) -> Table:
     if not reply.get("ok"):
         raise RuntimeError(str(reply.get("error", "the query failed")))
     return Table(list(reply.get("columns", [])), list(reply.get("rows", []))[:MAX_ROWS])
+
+
+def frame_rows(df: Any) -> tuple[list[str], list[list[Any]]]:
+    """The column names and the row lists of a Table, a list of dicts or a DataFrame."""
+    if isinstance(df, Table):
+        return list(df.columns), [list(r) for r in df.rows]
+    if isinstance(df, list) and all(isinstance(r, dict) for r in df):
+        cols = list(df[0]) if df else []
+        return cols, [[r.get(c) for c in cols] for r in df]
+    if hasattr(df, "to_dicts"):  # polars
+        return frame_rows(df.to_dicts())
+    if hasattr(df, "to_dict"):  # pandas
+        return frame_rows(df.to_dict("records"))
+    raise TypeError("write_sample takes a DataFrame, a Table or a list of dicts")
+
+
+def write_sample(df: Any, name: str) -> int:
+    """Writes the rows as table `sample.<name>` and returns the row count.
+
+    Studio writes the table. It refuses a name outside the `sample` schema.
+    """
+    columns, rows = frame_rows(df)
+    request = {"table": name, "columns": columns, "rows": rows}
+    reply = json.loads(input(WRITE_PROMPT + json.dumps(request, default=str)))
+    if not reply.get("ok"):
+        raise RuntimeError(str(reply.get("error", "the write failed")))
+    return int(reply.get("rows", 0))
 
 
 def table_bundle(obj: Any, chart: dict[str, str] | None = None) -> dict[str, Any] | None:
@@ -90,4 +124,4 @@ class _DbUtils:
 
 dbutils = _DbUtils()
 
-__all__ = ["Table", "dbutils", "display", "sql", "table_bundle"]
+__all__ = ["Table", "dbutils", "display", "sql", "table_bundle", "write_sample"]

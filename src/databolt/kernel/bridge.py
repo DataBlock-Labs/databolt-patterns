@@ -5,10 +5,12 @@ Studio talks to this bridge in JSON lines, one object per line, at most 8 MiB:
     Studio -> bridge   {"op": "execute", "code": "...", "params": {...}}
                        {"op": "interrupt"}
                        {"op": "sql_result", "ok": true, "columns": [...], "rows": [...]}
+                       {"op": "write_sample_result", "ok": true, "rows": 3}
                        {"op": "close"}
     bridge -> Studio   {"op": "output", "type": "stream" | "display_data"
                                          | "execute_result" | "error", "content": {...}}
                        {"op": "sql", "sql": "...", "params": {...}}
+                       {"op": "write_sample", "table": "...", "columns": [...], "rows": [...]}
                        {"op": "interrupted", "ok": bool, "error": "..."}
                        {"op": "done", "status": "ok" | "error" | "aborted"}
 
@@ -28,7 +30,7 @@ import sys
 import threading
 from typing import Any, Protocol, TextIO
 
-from databolt.kernel import PARAMS_PROMPT, SQL_PROMPT, TABLE_MIME
+from databolt.kernel import PARAMS_PROMPT, SQL_PROMPT, TABLE_MIME, WRITE_PROMPT
 
 MAX_LINE = 8 * 1024 * 1024
 # Jupyter messages the bridge passes to Studio.
@@ -40,6 +42,8 @@ NO_INTERRUPT = {"rust"}
 WARMUP = {"xcpp17": "#include <iostream>"}
 
 Inbox = queue.Queue[dict[str, Any]]
+# Studio's answers to the requests of a running cell.
+RESULTS = {"sql_result", "write_sample_result"}
 
 # MIME types a notebook output may carry: none of them is active content.
 # text/markdown is not one: it can hold raw HTML and javascript: links.
@@ -126,7 +130,7 @@ class Bridge:
         self.inbox = inbox
         self.can_interrupt = can_interrupt
         self.closed = False
-        # A sql_result read while polling, kept for the request that waits for it.
+        # A result read while polling, kept for the request that waits for it.
         self.pending: dict[str, Any] | None = None
 
     def send(self, msg: dict[str, Any]) -> None:
@@ -180,28 +184,46 @@ class Bridge:
             return None
         if op == "close":
             self.closed = True
-        elif op == "sql_result":
+        elif op in RESULTS:
             self.pending = msg
         return msg
 
-    def ask_sql(self, request: dict[str, Any]) -> dict[str, Any]:
-        """Sends a `sql` request and waits for Studio's answer."""
-        self.send({"op": "sql", "sql": request.get("sql", ""), "params": request.get("params", {})})
-        if self.pending is not None:
-            msg, self.pending = self.pending, None
-            return {k: v for k, v in msg.items() if k != "op"}
+    def ask(self, msg: dict[str, Any], result: str) -> dict[str, Any]:
+        """Sends a request to Studio and waits for its answer, the message `result`."""
+        if len(json.dumps(msg, default=str)) >= MAX_LINE:
+            # `send` drops a line this long, so Studio would never answer.
+            return {"ok": False, "error": "The request is over 8 MiB; send fewer rows."}
+        self.send(msg)
+        if self.pending is not None and self.pending.get("op") == result:
+            got, self.pending = self.pending, None
+            return {k: v for k, v in got.items() if k != "op"}
         while not self.closed:
             try:
-                msg = self.inbox.get(timeout=0.1)
+                got = self.inbox.get(timeout=0.1)
             except queue.Empty:
                 continue
-            if msg.get("op") == "interrupt":
+            if got.get("op") == "interrupt":
                 self.interrupt()
-            elif msg.get("op") == "close":
+            elif got.get("op") == "close":
                 self.closed = True
-            elif msg.get("op") == "sql_result":
-                return {k: v for k, v in msg.items() if k != "op"}
+            elif got.get("op") == result:
+                return {k: v for k, v in got.items() if k != "op"}
         return {"ok": False, "error": "the session closed"}
+
+    def ask_sql(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Sends a `sql` request and waits for Studio's answer."""
+        msg = {"op": "sql", "sql": request.get("sql", ""), "params": request.get("params", {})}
+        return self.ask(msg, "sql_result")
+
+    def ask_write_sample(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Sends a `write_sample` request and waits for Studio's answer."""
+        msg = {
+            "op": "write_sample",
+            "table": request.get("table", ""),
+            "columns": request.get("columns", []),
+            "rows": request.get("rows", []),
+        }
+        return self.ask(msg, "write_sample_result")
 
     def answer_input(self, prompt: str, params: dict[str, Any]) -> None:
         if prompt.startswith(SQL_PROMPT):
@@ -210,6 +232,13 @@ class Bridge:
             except json.JSONDecodeError:
                 req = {}
             self.client.answer(json.dumps(self.ask_sql(req if isinstance(req, dict) else {})))
+        elif prompt.startswith(WRITE_PROMPT):
+            try:
+                req = json.loads(prompt[len(WRITE_PROMPT) :])
+            except json.JSONDecodeError:
+                req = {}
+            answer = self.ask_write_sample(req if isinstance(req, dict) else {})
+            self.client.answer(json.dumps(answer))
         elif prompt == PARAMS_PROMPT:
             self.client.answer(json.dumps(params))
         else:
