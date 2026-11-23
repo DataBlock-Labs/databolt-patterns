@@ -35,6 +35,9 @@ MAX_LINE = 8 * 1024 * 1024
 RELAY = {"stream", "display_data", "execute_result", "error"}
 # Kernels that ignore an interrupt (evcxr: a Rust thread cannot be stopped).
 NO_INTERRUPT = {"rust"}
+# Code a kernel runs once at start, before the first cell.
+# xeus-cpp hangs when a cell both includes <iostream> for the first time and uses it.
+WARMUP = {"xcpp17": "#include <iostream>"}
 
 Inbox = queue.Queue[dict[str, Any]]
 
@@ -290,6 +293,11 @@ class JupyterClient:
         self.kc = self.km.blocking_client()
         self.kc.start_channels()
         self.kc.wait_for_ready(timeout=120)
+        if kernel in WARMUP:
+            # The output hook drops every message: stdout carries protocol lines only.
+            self.kc.execute_interactive(
+                WARMUP[kernel], timeout=120, store_history=False, output_hook=lambda _m: None
+            )
 
     def _get(self, get: Any, timeout: float) -> dict[str, Any] | None:
         try:
